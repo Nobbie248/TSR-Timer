@@ -14,10 +14,11 @@ It’s mainly intended for **movement practice / speedrunning**, not as a polish
 - Use **windowed fullscreen**
 - No game injection, no memory writing (read-only)
 - **F10** hotkey to close the overlay
+- More features coming
 
 ---
 
-## How it works (roughly)
+## How it works
 
 - Finds the game process by name
 - Resolves player position (X/Y/Z) through memory pointers
@@ -35,4 +36,4 @@ This is **not** a hook or DLL injection — it uses `ReadProcessMemory`.
 - Updates to the game can break memory addresses
 - Currently Windows-only (Linux via Proton is experimental)
 
-If it fails to attach or shows zero values, that usually means the pointer chain needs updating.
+If it fails to attach or shows zero values, please report.
