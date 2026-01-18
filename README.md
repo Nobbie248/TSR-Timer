@@ -1,39 +1,23 @@
-# TSR Speed Overlay
+README.txt
+==========
 
-A simple external speed overlay for **TimeSplitters Rewind**.
+This tool is READ-ONLY.
+No cheats, no automation, no input hooks.
 
-This tool reads the player’s in-game **X / Y / Z coordinates** and calculates movement speed in real time.  
-It’s mainly intended for **movement practice / speedrunning**, not as a polished end-user app.
+It does not write to game memory, modify values,
+or change gameplay in any way.
 
----
+The overlay reads player position data XYZ and direction,
+player death, pause and complete.
 
-## Features
+Intended use:
+- Speedrunning
+- Practice / routing
+- Movement consistency testing
 
-- Live speed display (based on player **X, Y, Z world coordinates**)
-- Lightweight Win32 overlay
-- Use **windowed fullscreen**
-- No game injection, no memory writing (read-only)
-- **F10** hotkey to close the overlay
-- More features coming
+brief read failures are possible, please report.
 
----
-
-## How it works
-
-- Finds the game process by name
-- Resolves player position (X/Y/Z) through memory pointers
-- Calculates speed using distance moved over time
-- Displays the result in a small always-on-top window
-
-This is **not** a hook or DLL injection — it uses `ReadProcessMemory`.
-
----
-
-## Limitations / Important Notes
-
-- Pointer paths are **not guaranteed to work on every PC**
-- Different machines may need different pointer paths
-- Updates to the game can break memory addresses
-- Currently Windows-only (Linux via Proton is experimental)
-
-If it fails to attach or shows zero values, please report.
+Note:
+Frame drops or unstable FPS can affect reported values,
+as speed is calculated over time.
+should work fine on stable frame rates 60 or more.
