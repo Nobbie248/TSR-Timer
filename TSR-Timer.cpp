@@ -422,8 +422,8 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
     RegisterClass(&wc);
 
     HWND hwnd = CreateWindowEx(
-        WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW,
-        className, "",
+        WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_APPWINDOW,
+        className, "TSR-Timer",
         WS_POPUP | WS_VISIBLE,
         100, 100, kOverlayTimerOnlyW, kOverlayTimerOnlyH,
         nullptr, nullptr, hInst, nullptr

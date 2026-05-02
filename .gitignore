@@ -36,6 +36,7 @@
 
 # Build output
 build/
+TSR-Timer release/
 *.pdb
 *.ilk
 *.res

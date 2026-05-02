@@ -14,6 +14,9 @@ It borrows `LiveSplit.Core.dll` and `LiveSplit.View.dll` from LiveSplit as packa
 Timing accuracy:
 TSR-Timer uses Windows `QueryPerformanceCounter`, the same high-resolution timer approach used by LiveSplit-style timers. Game events are polled every 4ms, so start and stop detection is designed to be as close as possible while staying lightweight.
 
+Display mode:
+Run TimeSplitters Rewind in windowed fullscreen / borderless fullscreen so the overlay can stay visible on top. True exclusive fullscreen may hide normal desktop overlays.
+
 Runtime files:
 - build/TSR-Timer.exe
 - build/TSRAutosplitBridge.dll
