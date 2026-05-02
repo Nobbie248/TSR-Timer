@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ClCompile Include="TSR-Timer.cpp" />
+    <None Include="TSRAutosplitBridge.cs" />
+    <None Include="Components\uhara10" />
+    <None Include="README.md" />
+    <None Include="LICENSE" />
+    <None Include="LiveSplit.Core.dll" />
+    <None Include="LiveSplit.View.dll" />
+    <None Include="SharpDisasm.dll" />
+    <ResourceCompile Include="Resource.rc" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <ConfigurationType>Application</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset> <!-- VS2022 -->
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <CharacterSet>MultiByte</CharacterSet>
+    <TargetName>TSR-Timer</TargetName>
+    <OutDir>$(SolutionDir)build\</OutDir>
+    <IntDir>$(SolutionDir)build\obj\$(Configuration)-$(Platform)\</IntDir>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <Target Name="BuildAutosplitBridge" BeforeTargets="ClCompile">
+    <Exec Command="&quot;$(WINDIR)\Microsoft.NET\Framework64\v4.0.30319\csc.exe&quot; /nologo /target:library /langversion:4 /r:Microsoft.CSharp.dll /out:&quot;$(OutDir)TSRAutosplitBridge.dll&quot; &quot;$(ProjectDir)TSRAutosplitBridge.cs&quot;" />
+    <MakeDir Directories="$(OutDir)Components" />
+    <Copy SourceFiles="$(ProjectDir)LiveSplit.Core.dll;$(ProjectDir)LiveSplit.View.dll;$(ProjectDir)SharpDisasm.dll" DestinationFolder="$(OutDir)" />
+    <Copy SourceFiles="$(ProjectDir)Components\uhara10" DestinationFolder="$(OutDir)Components" />
+    <Copy SourceFiles="$(ProjectDir)README.md;$(ProjectDir)LICENSE" DestinationFolder="$(OutDir)" />
+  </Target>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+
+</Project>
