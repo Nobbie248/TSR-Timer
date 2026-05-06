@@ -97,12 +97,13 @@ static const char* kChallengeRouteNames[32] = {
     "Cortez Can't Jump!",
     "TSUG"
 };
-static const char* kModeNames[5] = {
+static const int kModeCount = 4;
+static const bool kBestTimesEnabled = false;
+static const char* kModeNames[4] = {
     "Single story level run",
     "Full TS story run",
     "Challenge run",
-    "Full challenge run",
-    "Best times"
+    "Full challenge run"
 };
 
 enum class AppScreen
@@ -524,6 +525,9 @@ static std::string StoryModeName(const char* baseMode)
 static void LoadBestTimes()
 {
     gBestTimes.clear();
+    if (!kBestTimesEnabled)
+        return;
+
     std::ifstream in(BestTimeFilePath());
     if (!in)
     {
@@ -585,6 +589,9 @@ static void SaveBestTimes()
 
 static void RecordBestTime(const std::string& mode, const std::string& name, double seconds)
 {
+    if (!kBestTimesEnabled)
+        return;
+
     if (mode.empty() || name.empty() || seconds <= 0.0)
         return;
     if (mode == "Challenge timer" || mode == "Challenge run")
@@ -826,35 +833,24 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 return 0;
             }
 
-            for (int i = 0; i < 5; ++i)
+            for (int i = 0; i < kModeCount; ++i)
             {
                 if (PointInRect(gModeButtonRects[i], x, y))
                 {
-                    if (i >= 0 && i <= 3)
-                    {
-                        if (i == 1)
-                            gAppScreen = AppScreen::FullStoryTimer;
-                        else if (i == 3)
-                            gAppScreen = AppScreen::FullChallengeTimer;
-                        else
-                            gAppScreen = AppScreen::SingleLevelTimer;
-                        gChallengeModeActive = (i == 2 || i == 3);
-                        gChallengeEnteredAt = gChallengeModeActive ? GetTimeSeconds() : -1.0;
-                        gScreenChanged = true;
-                        gFinishedRunTimes.clear();
-                        gRunTimerSeconds = 0.0;
-                        gRunTimerLineActive = false;
-                        gForceClearResetRequested = true;
-                        gResetTimerRequested = true;
-                    }
+                    if (i == 1)
+                        gAppScreen = AppScreen::FullStoryTimer;
+                    else if (i == 3)
+                        gAppScreen = AppScreen::FullChallengeTimer;
                     else
-                    {
-                        gAppScreen = AppScreen::BestTimes;
-                        gChallengeModeActive = false;
-                        gChallengeEnteredAt = -1.0;
-                        gScreenChanged = true;
-                        LoadBestTimes();
-                    }
+                        gAppScreen = AppScreen::SingleLevelTimer;
+                    gChallengeModeActive = (i == 2 || i == 3);
+                    gChallengeEnteredAt = gChallengeModeActive ? GetTimeSeconds() : -1.0;
+                    gScreenChanged = true;
+                    gFinishedRunTimes.clear();
+                    gRunTimerSeconds = 0.0;
+                    gRunTimerLineActive = false;
+                    gForceClearResetRequested = true;
+                    gResetTimerRequested = true;
                     InvalidateRect(hwnd, nullptr, FALSE);
                     return 0;
                 }
@@ -1005,7 +1001,7 @@ static void DrawModeSelector(HWND hwnd)
     };
 
     int top = ScaleUi(64);
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < kModeCount; ++i)
     {
         gModeButtonRects[i] = { ScaleUi(12), top + (i * ScaleUi(34)), w - ScaleUi(12), top + (i * ScaleUi(34)) + ScaleUi(26) };
         DrawButton(gModeButtonRects[i], kModeNames[i], false);
