@@ -42,13 +42,14 @@ static RECT gScaleDownButtonRect = { 0, 0, 0, 0 };
 static RECT gScaleUpButtonRect = { 0, 0, 0, 0 };
 static RECT gCloseButtonRect = { 0, 0, 0, 0 };
 static RECT gBackButtonRect = { 0, 0, 0, 0 };
-static RECT gModeButtonRects[4] = {};
+static RECT gModeButtonRects[5] = {};
 static RECT gModeCloseButtonRect = { 0, 0, 0, 0 };
 
-static const int kOverlayTimerOnlyW = 224;
+static const int kOverlayTimerOnlyW = 236;
 static const int kOverlayTimerOnlyH = 302;
+static const int kFullChallengeTimerH = 876;
 static const int kModeSelectorW = kOverlayTimerOnlyW;
-static const int kModeSelectorH = 214;
+static const int kModeSelectorH = 248;
 static const char* kRouteNames[9] = {
     "Tomb",
     "Chinese",
@@ -60,10 +61,45 @@ static const char* kRouteNames[9] = {
     "Docks",
     "Spaceways"
 };
-static const char* kModeNames[4] = {
+static const char* kChallengeRouteNames[32] = {
+    "Barrel Blast",
+    "Barrel Roll",
+    "Behead The Undead",
+    "Putrid Punchout",
+    "Dusk of the Dead",
+    "FOTLD",
+    "A Grave Mistake",
+    "Sergio's Last Stand",
+    "Day of the Damned",
+    "Heist",
+    "Shipyard Takedown",
+    "Space Boarders",
+    "Banana Republic",
+    "Gibbon No Chances",
+    "Claim to Flame",
+    "SISGB",
+    "Don't Wait Around",
+    "Avec Le Brique",
+    "Pane in the Neck",
+    "Bricking it",
+    "One In a Melon",
+    "Dessert Storm",
+    "Pier Pressure",
+    "Simian Shootout",
+    "Dam Bursters",
+    "Pick Yer Piece",
+    "NGO",
+    "Card-io Exercise",
+    "Silent but Deadly",
+    "Silent Night",
+    "Cortez Can't Jump!",
+    "TSUG"
+};
+static const char* kModeNames[5] = {
     "Single story level run",
     "Full TS story run",
-    "Challenge timer",
+    "Challenge run",
+    "Full challenge run",
     "Best times"
 };
 
@@ -72,6 +108,7 @@ enum class AppScreen
     ModeSelector,
     SingleLevelTimer,
     FullStoryTimer,
+    FullChallengeTimer,
     BestTimes
 };
 
@@ -114,6 +151,8 @@ static int CurrentScreenHeight()
         return ScaleUi(100);
     if (gAppScreen == AppScreen::ModeSelector)
         return ScaleUi(kModeSelectorH);
+    if (gAppScreen == AppScreen::FullChallengeTimer)
+        return ScaleUi(kFullChallengeTimerH);
 
     return ScaleUi(kOverlayTimerOnlyH);
 }
@@ -437,7 +476,7 @@ static void UpdateCurrentGameName(bool challengeMode)
 static const char* CurrentModeName()
 {
     if (gChallengeModeActive)
-        return "Challenge timer";
+        return (gAppScreen == AppScreen::FullChallengeTimer) ? "Full challenge run" : "Challenge run";
     if (gAppScreen == AppScreen::FullStoryTimer)
         return "Full TS story run";
     return "Single story level run";
@@ -485,9 +524,11 @@ static void LoadBestTimes()
             !std::getline(ss, secondsText))
             continue;
 
-        if (mode == "Challenge timer")
+        if (mode == "Challenge timer" || mode == "Challenge run")
             continue;
         if (mode == "Full TS story run" && name != "Total")
+            continue;
+        if (mode == "Full challenge run" && name != "Total")
             continue;
         if (name == "Unknown" || name == "Unknown Challenge")
             continue;
@@ -515,9 +556,11 @@ static void RecordBestTime(const std::string& mode, const std::string& name, dou
 {
     if (mode.empty() || name.empty() || seconds <= 0.0)
         return;
-    if (mode == "Challenge timer")
+    if (mode == "Challenge timer" || mode == "Challenge run")
         return;
     if (mode == "Full TS story run" && name != "Total")
+        return;
+    if (mode == "Full challenge run" && name != "Total")
         return;
     if (name == "Unknown" || name == "Unknown Challenge")
         return;
@@ -541,6 +584,17 @@ static void RecordBestTime(const std::string& mode, const std::string& name, dou
     record.seconds = seconds;
     gBestTimes.push_back(record);
     SaveBestTimes();
+}
+
+static double FindBestTimeSeconds(const std::string& mode, const std::string& name)
+{
+    for (const BestTimeRecord& record : gBestTimes)
+    {
+        if (record.mode == mode && record.name == name)
+            return record.seconds;
+    }
+
+    return 0.0;
 }
 
 static void FormatRunTimer(double seconds, char* out, size_t outSize)
@@ -718,14 +772,19 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 return 0;
             }
 
-            for (int i = 0; i < 4; ++i)
+            for (int i = 0; i < 5; ++i)
             {
                 if (PointInRect(gModeButtonRects[i], x, y))
                 {
-                    if (i == 0 || i == 1 || i == 2)
+                    if (i >= 0 && i <= 3)
                     {
-                        gAppScreen = (i == 1) ? AppScreen::FullStoryTimer : AppScreen::SingleLevelTimer;
-                        gChallengeModeActive = (i == 2);
+                        if (i == 1)
+                            gAppScreen = AppScreen::FullStoryTimer;
+                        else if (i == 3)
+                            gAppScreen = AppScreen::FullChallengeTimer;
+                        else
+                            gAppScreen = AppScreen::SingleLevelTimer;
+                        gChallengeModeActive = (i == 2 || i == 3);
                         gChallengeEnteredAt = gChallengeModeActive ? GetTimeSeconds() : -1.0;
                         gScreenChanged = true;
                         gFinishedRunTimes.clear();
@@ -866,7 +925,7 @@ static void DrawModeSelector(HWND hwnd)
     HGDIOBJ oldFont = SelectObject(memDC, titleFont);
 
     RECT title = rect;
-    title.top += ScaleUi(10);
+    title.top += ScaleUi(34);
     SetTextColor(memDC, RGB(220, 220, 220));
     DrawTextA(memDC, "TSR-Timer", -1, &title, DT_CENTER | DT_TOP | DT_SINGLELINE);
 
@@ -891,8 +950,8 @@ static void DrawModeSelector(HWND hwnd)
             (symbolButton ? DT_CENTER : DT_LEFT) | DT_VCENTER | DT_SINGLELINE);
     };
 
-    int top = ScaleUi(42);
-    for (int i = 0; i < 4; ++i)
+    int top = ScaleUi(64);
+    for (int i = 0; i < 5; ++i)
     {
         gModeButtonRects[i] = { ScaleUi(12), top + (i * ScaleUi(34)), w - ScaleUi(12), top + (i * ScaleUi(34)) + ScaleUi(26) };
         DrawButton(gModeButtonRects[i], kModeNames[i], false);
@@ -909,7 +968,7 @@ static void DrawModeSelector(HWND hwnd)
     }
 
     int symbolSize = ScaleUi(20);
-    int buttonTop = h - ScaleUi(28);
+    int buttonTop = ScaleUi(8);
     gScaleDownButtonRect = { ScaleUi(12), buttonTop, ScaleUi(12) + symbolSize, buttonTop + symbolSize };
     gScaleUpButtonRect = { gScaleDownButtonRect.right + ScaleUi(4), buttonTop, gScaleDownButtonRect.right + ScaleUi(4) + symbolSize, buttonTop + symbolSize };
     gModeCloseButtonRect = { w - ScaleUi(12) - symbolSize, buttonTop, w - ScaleUi(12), buttonTop + symbolSize };
@@ -971,6 +1030,16 @@ static void DrawOverlay(HWND hwnd)
         DEFAULT_PITCH | FF_SWISS,
         "Arial"
     );
+    HFONT buttonFont = CreateFontA(
+        ScaleUi(17), 0, 0, 0, FW_BOLD,
+        FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS,
+        ANTIALIASED_QUALITY,
+        DEFAULT_PITCH | FF_SWISS,
+        "Arial"
+    );
     HGDIOBJ oldFont = SelectObject(memDC, font);
 
     const int padL = ScaleUi(12);
@@ -982,7 +1051,7 @@ static void DrawOverlay(HWND hwnd)
     RECT content = rect;
     content.left += padL;
     content.right -= padR;
-    content.top += padT;
+    content.top += padT + ScaleUi(26);
     content.bottom -= padB;
 
     char timerText[32];
@@ -993,12 +1062,12 @@ static void DrawOverlay(HWND hwnd)
         std::snprintf(line, sizeof(line), "%d  %s", rowNumber, timerText);
 
         RECT rTime = content;
-        rTime.right = content.left + ScaleUi(88);
+        rTime.right = content.left + ScaleUi(gAppScreen == AppScreen::FullChallengeTimer ? 70 : 88);
         rTime.top = rowY;
         SetTextColor(memDC, timeColor);
         DrawTextA(memDC, line, -1, &rTime, DT_LEFT | DT_TOP | DT_SINGLELINE);
 
-        if (rowNumber >= 1 && rowNumber <= 9)
+        if (gAppScreen == AppScreen::FullStoryTimer && rowNumber >= 1 && rowNumber <= 9)
         {
             RECT rName = content;
             rName.left = rTime.right + ScaleUi(2);
@@ -1006,19 +1075,28 @@ static void DrawOverlay(HWND hwnd)
             SetTextColor(memDC, RGB(220, 220, 220));
             DrawTextA(memDC, kRouteNames[rowNumber - 1], -1, &rName, DT_RIGHT | DT_TOP | DT_SINGLELINE);
         }
+        else if (gAppScreen == AppScreen::FullChallengeTimer && rowNumber >= 1 && rowNumber <= 32)
+        {
+            RECT rName = content;
+            rName.left = rTime.right - ScaleUi(2);
+            rName.top = rowY;
+            SetTextColor(memDC, RGB(220, 220, 220));
+            DrawTextA(memDC, kChallengeRouteNames[rowNumber - 1], -1, &rName, DT_RIGHT | DT_TOP | DT_SINGLELINE);
+        }
     };
 
     double totalSeconds = 0.0;
     for (size_t i = 0; i < gFinishedRunTimes.size(); ++i)
         totalSeconds += gFinishedRunTimes[i];
 
-    size_t maxFinishedRows = gRunTimerLineActive ? 8 : 9;
+    const size_t maxRows = (gAppScreen == AppScreen::FullChallengeTimer) ? 32 : 9;
+    size_t maxFinishedRows = gRunTimerLineActive ? maxRows - 1 : maxRows;
     size_t firstFinished = 0;
     if (gFinishedRunTimes.size() > maxFinishedRows)
         firstFinished = gFinishedRunTimes.size() - maxFinishedRows;
 
     int rowY = content.top;
-    int rowNumber = 1;
+    int rowNumber = (int)firstFinished + 1;
     for (size_t i = firstFinished; i < gFinishedRunTimes.size(); ++i)
     {
         DrawTimerLine(rowNumber++, gFinishedRunTimes[i], rowY, RGB(255, 255, 255));
@@ -1035,10 +1113,11 @@ static void DrawOverlay(HWND hwnd)
     FormatRunTimer(totalSeconds, timerText, sizeof(timerText));
     std::snprintf(line, sizeof(line), "Total %s", timerText);
     RECT rTotal = content;
-    rTotal.top = content.top + (lineStep * 9);
+    rTotal.top = content.bottom - ScaleUi(31);
     SetTextColor(memDC, RGB(220, 220, 220));
     DrawTextA(memDC, line, -1, &rTotal, DT_LEFT | DT_TOP | DT_SINGLELINE);
 
+    SelectObject(memDC, buttonFont);
     auto DrawButton = [&](RECT& r, const char* text, COLORREF fill, COLORREF edge) {
         HBRUSH brush = CreateSolidBrush(fill);
         HPEN pen = CreatePen(PS_SOLID, 1, edge);
@@ -1050,26 +1129,27 @@ static void DrawOverlay(HWND hwnd)
         DeleteObject(brush);
         DeleteObject(pen);
 
-        SetTextColor(memDC, RGB(255, 255, 255));
+        SetTextColor(memDC, fill == RGB(70, 50, 55) ? RGB(255, 235, 235) : RGB(220, 220, 220));
         DrawTextA(memDC, text, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     };
 
-    int buttonTop = content.bottom - ScaleUi(24);
-    gBackButtonRect = { content.left, buttonTop, content.left + ScaleUi(44), buttonTop + ScaleUi(20) };
-    gResetButtonRect = { gBackButtonRect.right + ScaleUi(4), buttonTop, gBackButtonRect.right + ScaleUi(50), buttonTop + ScaleUi(20) };
-    gScaleDownButtonRect = { gResetButtonRect.right + ScaleUi(4), buttonTop, gResetButtonRect.right + ScaleUi(24), buttonTop + ScaleUi(20) };
+    int buttonTop = ScaleUi(8);
+    gScaleDownButtonRect = { ScaleUi(12), buttonTop, ScaleUi(32), buttonTop + ScaleUi(20) };
     gScaleUpButtonRect = { gScaleDownButtonRect.right + ScaleUi(4), buttonTop, gScaleDownButtonRect.right + ScaleUi(24), buttonTop + ScaleUi(20) };
-    gCloseButtonRect = { gScaleUpButtonRect.right + ScaleUi(4), buttonTop, gScaleUpButtonRect.right + ScaleUi(29), buttonTop + ScaleUi(20) };
+    gBackButtonRect = { gScaleUpButtonRect.right + ScaleUi(4), buttonTop, gScaleUpButtonRect.right + ScaleUi(48), buttonTop + ScaleUi(20) };
+    gResetButtonRect = { gBackButtonRect.right + ScaleUi(4), buttonTop, gBackButtonRect.right + ScaleUi(50), buttonTop + ScaleUi(20) };
+    gCloseButtonRect = { w - ScaleUi(32), buttonTop, w - ScaleUi(12), buttonTop + ScaleUi(20) };
 
-    DrawButton(gBackButtonRect, "Back", RGB(55, 55, 65), RGB(140, 140, 150));
-    DrawButton(gResetButtonRect, "Reset", RGB(55, 55, 65), RGB(140, 140, 150));
-    DrawButton(gScaleDownButtonRect, "-", RGB(45, 45, 55), RGB(125, 125, 135));
-    DrawButton(gScaleUpButtonRect, "+", RGB(45, 45, 55), RGB(125, 125, 135));
-    DrawButton(gCloseButtonRect, "X", RGB(90, 35, 35), RGB(220, 110, 110));
+    DrawButton(gScaleDownButtonRect, "-", RGB(35, 35, 43), RGB(120, 120, 130));
+    DrawButton(gScaleUpButtonRect, "+", RGB(35, 35, 43), RGB(120, 120, 130));
+    DrawButton(gBackButtonRect, "Back", RGB(35, 35, 43), RGB(120, 120, 130));
+    DrawButton(gResetButtonRect, "Reset", RGB(35, 35, 43), RGB(120, 120, 130));
+    DrawButton(gCloseButtonRect, "X", RGB(70, 50, 55), RGB(220, 110, 110));
 
     BitBlt(hdc, 0, 0, w, h, memDC, 0, 0, SRCCOPY);
     SelectObject(memDC, oldFont);
     DeleteObject(font);
+    DeleteObject(buttonFont);
     ReleaseDC(hwnd, hdc);
 }
 
@@ -1121,7 +1201,7 @@ static void DrawSingleTimer(HWND hwnd)
         "Arial"
     );
     HFONT buttonFont = CreateFontA(
-        ScaleUi(18), 0, 0, 0, FW_BOLD,
+        ScaleUi(17), 0, 0, 0, FW_BOLD,
         FALSE, FALSE, FALSE,
         DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS,
@@ -1136,7 +1216,7 @@ static void DrawSingleTimer(HWND hwnd)
     FormatRunTimer(gRunTimerSeconds, timerText, sizeof(timerText));
 
     RECT timerRect = rect;
-    timerRect.top += ScaleUi(20);
+    timerRect.top += ScaleUi(45);
     SetTextColor(memDC, gRunTimerLineActive ? RGB(220, 110, 110) : RGB(220, 220, 220));
     DrawTextA(memDC, timerText, -1, &timerRect, DT_CENTER | DT_TOP | DT_SINGLELINE);
 
@@ -1152,23 +1232,22 @@ static void DrawSingleTimer(HWND hwnd)
         DeleteObject(brush);
         DeleteObject(pen);
 
-        SetTextColor(memDC, RGB(255, 255, 255));
+        SetTextColor(memDC, fill == RGB(70, 50, 55) ? RGB(255, 235, 235) : RGB(220, 220, 220));
         DrawTextA(memDC, text, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     };
 
-    int buttonTop = rect.bottom - ScaleUi(31);
-    int left = ScaleUi(12);
-    gBackButtonRect = { left, buttonTop, left + ScaleUi(44), buttonTop + ScaleUi(20) };
-    gResetButtonRect = { gBackButtonRect.right + ScaleUi(4), buttonTop, gBackButtonRect.right + ScaleUi(50), buttonTop + ScaleUi(20) };
-    gScaleDownButtonRect = { gResetButtonRect.right + ScaleUi(4), buttonTop, gResetButtonRect.right + ScaleUi(24), buttonTop + ScaleUi(20) };
+    int buttonTop = ScaleUi(8);
+    gScaleDownButtonRect = { ScaleUi(12), buttonTop, ScaleUi(32), buttonTop + ScaleUi(20) };
     gScaleUpButtonRect = { gScaleDownButtonRect.right + ScaleUi(4), buttonTop, gScaleDownButtonRect.right + ScaleUi(24), buttonTop + ScaleUi(20) };
-    gCloseButtonRect = { gScaleUpButtonRect.right + ScaleUi(4), buttonTop, gScaleUpButtonRect.right + ScaleUi(29), buttonTop + ScaleUi(20) };
+    gBackButtonRect = { gScaleUpButtonRect.right + ScaleUi(4), buttonTop, gScaleUpButtonRect.right + ScaleUi(48), buttonTop + ScaleUi(20) };
+    gResetButtonRect = { gBackButtonRect.right + ScaleUi(4), buttonTop, gBackButtonRect.right + ScaleUi(50), buttonTop + ScaleUi(20) };
+    gCloseButtonRect = { w - ScaleUi(32), buttonTop, w - ScaleUi(12), buttonTop + ScaleUi(20) };
 
-    DrawButton(gBackButtonRect, "Back", RGB(55, 55, 65), RGB(140, 140, 150));
-    DrawButton(gResetButtonRect, "Reset", RGB(55, 55, 65), RGB(140, 140, 150));
-    DrawButton(gScaleDownButtonRect, "-", RGB(45, 45, 55), RGB(125, 125, 135));
-    DrawButton(gScaleUpButtonRect, "+", RGB(45, 45, 55), RGB(125, 125, 135));
-    DrawButton(gCloseButtonRect, "X", RGB(90, 35, 35), RGB(220, 110, 110));
+    DrawButton(gScaleDownButtonRect, "-", RGB(35, 35, 43), RGB(120, 120, 130));
+    DrawButton(gScaleUpButtonRect, "+", RGB(35, 35, 43), RGB(120, 120, 130));
+    DrawButton(gBackButtonRect, "Back", RGB(35, 35, 43), RGB(120, 120, 130));
+    DrawButton(gResetButtonRect, "Reset", RGB(35, 35, 43), RGB(120, 120, 130));
+    DrawButton(gCloseButtonRect, "X", RGB(70, 50, 55), RGB(220, 110, 110));
 
     BitBlt(hdc, 0, 0, w, h, memDC, 0, 0, SRCCOPY);
     SelectObject(memDC, oldFont);
@@ -1217,69 +1296,45 @@ static void DrawBestTimes(HWND hwnd)
     HFONT titleFont = CreateFontA(ScaleUi(18), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
         DEFAULT_PITCH | FF_SWISS, "Arial");
-    HFONT itemFont = CreateFontA(ScaleUi(14), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+    HFONT itemFont = CreateFontA(ScaleUi(18), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
+        DEFAULT_PITCH | FF_SWISS, "Arial");
+    HFONT buttonFont = CreateFontA(ScaleUi(17), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
         DEFAULT_PITCH | FF_SWISS, "Arial");
     HGDIOBJ oldFont = SelectObject(memDC, titleFont);
 
     RECT title = rect;
-    title.top += ScaleUi(8);
+    title.top += ScaleUi(31);
     SetTextColor(memDC, RGB(220, 220, 220));
     DrawTextA(memDC, "Best Times", -1, &title, DT_CENTER | DT_TOP | DT_SINGLELINE);
 
-    std::vector<BestTimeRecord> sorted = gBestTimes;
-    std::sort(sorted.begin(), sorted.end(), [](const BestTimeRecord& a, const BestTimeRecord& b) {
-        if (a.mode != b.mode) return a.mode < b.mode;
-        return a.name < b.name;
-    });
-
     SelectObject(memDC, itemFont);
-    int y = ScaleUi(34);
-    int lineStep = ScaleUi(18);
+    int y = ScaleUi(56);
+    int lineStep = ScaleUi(20);
     char timeText[32];
     char line[192];
 
-    if (sorted.empty())
-    {
-        RECT empty = rect;
-        empty.left += ScaleUi(12);
-        empty.top = y;
-        SetTextColor(memDC, RGB(220, 110, 110));
-        DrawTextA(memDC, "No best times yet", -1, &empty, DT_LEFT | DT_TOP | DT_SINGLELINE);
-    }
-    else
-    {
-        std::string lastMode;
-        int rows = 0;
-        for (const BestTimeRecord& record : sorted)
-        {
-            if (rows >= 12)
-                break;
+    auto DrawBestRow = [&](const std::string& mode, const std::string& name, const char* displayName) {
+        double seconds = FindBestTimeSeconds(mode, name);
+        FormatRunTimer(seconds, timeText, sizeof(timeText));
+        std::snprintf(line, sizeof(line), "%s  %s", timeText, displayName);
 
-            if (record.mode != lastMode)
-            {
-                lastMode = record.mode;
-                RECT modeRect = rect;
-                modeRect.left += ScaleUi(12);
-                modeRect.top = y;
-                SetTextColor(memDC, RGB(220, 110, 110));
-                DrawTextA(memDC, lastMode.c_str(), -1, &modeRect, DT_LEFT | DT_TOP | DT_SINGLELINE);
-                y += lineStep;
-            }
+        RECT row = rect;
+        row.left += ScaleUi(12);
+        row.right -= ScaleUi(12);
+        row.top = y;
+        SetTextColor(memDC, seconds > 0.0 ? RGB(220, 220, 220) : RGB(150, 150, 150));
+        DrawTextA(memDC, line, -1, &row, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS);
+        y += lineStep;
+    };
 
-            FormatRunTimer(record.seconds, timeText, sizeof(timeText));
-            std::snprintf(line, sizeof(line), "%s  %s", timeText, record.name.c_str());
-            RECT row = rect;
-            row.left += ScaleUi(12);
-            row.right -= ScaleUi(12);
-            row.top = y;
-            SetTextColor(memDC, RGB(220, 220, 220));
-            DrawTextA(memDC, line, -1, &row, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS);
-            y += lineStep;
-            rows++;
-        }
-    }
+    for (const char* routeName : kRouteNames)
+        DrawBestRow("Single story level run", routeName, routeName);
+    DrawBestRow("Full TS story run", "Total", "Full Story Total");
+    DrawBestRow("Full challenge run", "Total", "Full Challenge Total");
 
+    SelectObject(memDC, buttonFont);
     auto DrawButton = [&](RECT& r, const char* text, COLORREF fill, COLORREF edge) {
         HBRUSH brush = CreateSolidBrush(fill);
         HPEN pen = CreatePen(PS_SOLID, 1, edge);
@@ -1291,27 +1346,27 @@ static void DrawBestTimes(HWND hwnd)
         DeleteObject(brush);
         DeleteObject(pen);
 
-        SetTextColor(memDC, RGB(255, 255, 255));
+        SetTextColor(memDC, fill == RGB(70, 50, 55) ? RGB(255, 235, 235) : RGB(220, 220, 220));
         DrawTextA(memDC, text, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     };
 
-    int buttonTop = rect.bottom - ScaleUi(31);
-    int left = ScaleUi(12);
-    gBackButtonRect = { left, buttonTop, left + ScaleUi(44), buttonTop + ScaleUi(20) };
-    gResetButtonRect = { 0, 0, 0, 0 };
-    gScaleDownButtonRect = { gBackButtonRect.right + ScaleUi(4), buttonTop, gBackButtonRect.right + ScaleUi(24), buttonTop + ScaleUi(20) };
+    int buttonTop = ScaleUi(8);
+    gScaleDownButtonRect = { ScaleUi(12), buttonTop, ScaleUi(32), buttonTop + ScaleUi(20) };
     gScaleUpButtonRect = { gScaleDownButtonRect.right + ScaleUi(4), buttonTop, gScaleDownButtonRect.right + ScaleUi(24), buttonTop + ScaleUi(20) };
-    gCloseButtonRect = { gScaleUpButtonRect.right + ScaleUi(4), buttonTop, gScaleUpButtonRect.right + ScaleUi(29), buttonTop + ScaleUi(20) };
+    gBackButtonRect = { gScaleUpButtonRect.right + ScaleUi(4), buttonTop, gScaleUpButtonRect.right + ScaleUi(48), buttonTop + ScaleUi(20) };
+    gResetButtonRect = { 0, 0, 0, 0 };
+    gCloseButtonRect = { w - ScaleUi(32), buttonTop, w - ScaleUi(12), buttonTop + ScaleUi(20) };
 
-    DrawButton(gBackButtonRect, "Back", RGB(55, 55, 65), RGB(140, 140, 150));
-    DrawButton(gScaleDownButtonRect, "-", RGB(45, 45, 55), RGB(125, 125, 135));
-    DrawButton(gScaleUpButtonRect, "+", RGB(45, 45, 55), RGB(125, 125, 135));
-    DrawButton(gCloseButtonRect, "X", RGB(90, 35, 35), RGB(220, 110, 110));
+    DrawButton(gScaleDownButtonRect, "-", RGB(35, 35, 43), RGB(120, 120, 130));
+    DrawButton(gScaleUpButtonRect, "+", RGB(35, 35, 43), RGB(120, 120, 130));
+    DrawButton(gBackButtonRect, "Back", RGB(35, 35, 43), RGB(120, 120, 130));
+    DrawButton(gCloseButtonRect, "X", RGB(70, 50, 55), RGB(220, 110, 110));
 
     BitBlt(hdc, 0, 0, w, h, memDC, 0, 0, SRCCOPY);
     SelectObject(memDC, oldFont);
     DeleteObject(titleFont);
     DeleteObject(itemFont);
+    DeleteObject(buttonFont);
     ReleaseDC(hwnd, hdc);
 }
 
@@ -1461,7 +1516,8 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
         {
             pendingAutoFlags.exchange(0);
             autoFlags = 0;
-            gFinishedRunTimes.clear();
+            if (gAppScreen != AppScreen::FullChallengeTimer)
+                gFinishedRunTimes.clear();
             timerRunning = false;
             timerElapsed = 0.0;
             gRunTimerSeconds = 0.0;
@@ -1508,7 +1564,8 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
             }
 
             gFinishedRunTimes.push_back(timerElapsed);
-            if (gFinishedRunTimes.size() > 9)
+            size_t maxStoredRows = (gAppScreen == AppScreen::FullChallengeTimer) ? 32 : 9;
+            if (gFinishedRunTimes.size() > maxStoredRows)
                 gFinishedRunTimes.erase(gFinishedRunTimes.begin());
 
             if (gAppScreen == AppScreen::FullStoryTimer && gFinishedRunTimes.size() == 9)
@@ -1517,6 +1574,13 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
                 for (double splitSeconds : gFinishedRunTimes)
                     total += splitSeconds;
                 RecordBestTime("Full TS story run", "Total", total);
+            }
+            else if (gAppScreen == AppScreen::FullChallengeTimer && gFinishedRunTimes.size() == 32)
+            {
+                double total = 0.0;
+                for (double splitSeconds : gFinishedRunTimes)
+                    total += splitSeconds;
+                RecordBestTime("Full challenge run", "Total", total);
             }
 
             timerRunning = false;

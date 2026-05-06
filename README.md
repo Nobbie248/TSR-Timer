@@ -10,7 +10,8 @@ Modes
 
 - Single story level run: one timer for the current story level.
 - Full TS story run: 9 split rows for a full story route.
-- Challenge timer: one timer for challenge runs.
+- Challenge run: one timer for challenge runs.
+- Full challenge run: 32 split rows for a full challenge route.
 - Best times: shows saved story best times.
 
 Autosplit Signals
@@ -36,7 +37,7 @@ Challenge start:
 - remaining timer field at `0x430`
 - logged internally as `mode=timer_tick`
 
-The challenge timer starts when the game mode timer begins ticking after the countdown.
+The Challenge run starts when the game mode timer begins ticking after the countdown.
 
 Challenge finish:
 
@@ -45,7 +46,7 @@ GameState stop probe:
 - `GameState + 0x300` increments
 - `GameState + 0x318` changes from `0` to `256`
 
-The challenge timer stops when that GameState stop transition is detected.
+The Challenge run stops when that GameState stop transition is detected.
 
 Best Times
 ----------
@@ -58,7 +59,9 @@ Single story saves one best time per story level.
 
 Full story saves only the completed 9-level total under `Full TS story run | Total`. While running full story, each individual level split also updates the matching `Single story level run` best time.
 
-Challenge timer does not save best times.
+Challenge run does not save best times.
+
+Full challenge run saves only the completed 32-challenge total under `Full challenge run | Total`.
 
 Runtime Files
 -------------
