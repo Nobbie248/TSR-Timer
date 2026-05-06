@@ -111,9 +111,9 @@ True exclusive fullscreen may hide normal desktop overlays.
 Logging
 -------
 
-Event logging is currently enabled for difficulty testing.
+Event logging is off by default.
 
-To turn event logging off, set `EnableEventLog` in `TSRAutosplitBridge.cs` to `false`, then rebuild.
+To debug event timing, set `EnableEventLog` in `TSRAutosplitBridge.cs` to `true`, then rebuild.
 
 Build
 -----

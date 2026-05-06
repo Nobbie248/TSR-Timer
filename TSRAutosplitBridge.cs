@@ -22,7 +22,7 @@ namespace TSRTimer
         const double ChallengePulseMinSecondsAfterArm = 0.75;
         const int ChallengeSplit = 1 << 7;
         const int Error = 1 << 30;
-        static readonly bool EnableEventLog = true;
+        static readonly bool EnableEventLog = false;
         const uint MEM_COMMIT = 0x1000;
         const uint MEM_RESERVE = 0x2000;
         const uint PAGE_EXECUTE_READWRITE = 0x40;
