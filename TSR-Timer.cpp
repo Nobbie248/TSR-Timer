@@ -590,6 +590,14 @@ static void SaveBestTimes()
         out << record.mode << "|" << record.name << "|" << record.seconds << "\n";
 }
 
+static double QuantizeRunTimer(double seconds)
+{
+    if (seconds < 0.0)
+        seconds = 0.0;
+
+    return (double)((int)(seconds * 100.0)) / 100.0;
+}
+
 static void RecordBestTime(const std::string& mode, const std::string& name, double seconds)
 {
     if (!kBestTimesEnabled)
@@ -597,6 +605,7 @@ static void RecordBestTime(const std::string& mode, const std::string& name, dou
 
     if (mode.empty() || name.empty() || seconds <= 0.0)
         return;
+    seconds = QuantizeRunTimer(seconds);
     if (mode == "Challenge timer" || mode == "Challenge run")
         return;
     if (mode == "Full TS story run" && name != "Total")
@@ -1151,7 +1160,7 @@ static void DrawOverlay(HWND hwnd)
 
     double totalSeconds = 0.0;
     for (size_t i = 0; i < gFinishedRunTimes.size(); ++i)
-        totalSeconds += gFinishedRunTimes[i];
+        totalSeconds += QuantizeRunTimer(gFinishedRunTimes[i]);
 
     const size_t maxRows = (gAppScreen == AppScreen::FullChallengeTimer) ? 32 : 9;
     size_t maxFinishedRows = gRunTimerLineActive ? maxRows - 1 : maxRows;
@@ -1171,7 +1180,7 @@ static void DrawOverlay(HWND hwnd)
     {
         DrawTimerLine(rowNumber++, gRunTimerSeconds, rowY, RGB(220, 110, 110));
         if (gRunTimerLineActive)
-            totalSeconds += gRunTimerSeconds;
+            totalSeconds += QuantizeRunTimer(gRunTimerSeconds);
     }
 
     FormatRunTimer(totalSeconds, timerText, sizeof(timerText));
@@ -1640,6 +1649,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
             timerElapsed = now - timerStart;
             if (timerElapsed < 0.0)
                 timerElapsed = 0.0;
+            timerElapsed = QuantizeRunTimer(timerElapsed);
 
             gRunTimerSeconds = timerElapsed;
             UpdateCurrentGameName(gChallengeModeActive);
