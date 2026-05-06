@@ -48,8 +48,10 @@ static RECT gModeCloseButtonRect = { 0, 0, 0, 0 };
 static const int kOverlayTimerOnlyW = 236;
 static const int kOverlayTimerOnlyH = 302;
 static const int kFullChallengeTimerH = 876;
+static const int kBestTimesH = 780;
 static const int kModeSelectorW = kOverlayTimerOnlyW;
 static const int kModeSelectorH = 248;
+static const char* kDifficultyNames[3] = { "Easy", "Normal", "Hard" };
 static const char* kRouteNames[9] = {
     "Tomb",
     "Chinese",
@@ -117,6 +119,7 @@ static bool gScreenChanged = false;
 static char gModeStatusText[96] = "";
 static bool gChallengeModeActive = false;
 static double gChallengeEnteredAt = -1.0;
+static int gStoryDifficultyIndex = -1;
 static char gExeDir[MAX_PATH] = {};
 
 struct BestTimeRecord
@@ -153,6 +156,8 @@ static int CurrentScreenHeight()
         return ScaleUi(kModeSelectorH);
     if (gAppScreen == AppScreen::FullChallengeTimer)
         return ScaleUi(kFullChallengeTimerH);
+    if (gAppScreen == AppScreen::BestTimes)
+        return ScaleUi(kBestTimesH);
 
     return ScaleUi(kOverlayTimerOnlyH);
 }
@@ -492,6 +497,30 @@ static std::string OldBestTimeFilePath()
     return AppPath("TSR-Timer-bests.txt");
 }
 
+static const char* StoryDifficultyName()
+{
+    if (gStoryDifficultyIndex < 0 || gStoryDifficultyIndex >= 3)
+        return "Unknown";
+    return kDifficultyNames[gStoryDifficultyIndex];
+}
+
+static const char* StoryDifficultyNameForIndex(int difficultyIndex)
+{
+    if (difficultyIndex < 0 || difficultyIndex >= 3)
+        return "Unknown";
+    return kDifficultyNames[difficultyIndex];
+}
+
+static std::string StoryModeNameForDifficulty(const char* baseMode, int difficultyIndex)
+{
+    return std::string(baseMode) + " " + StoryDifficultyNameForIndex(difficultyIndex);
+}
+
+static std::string StoryModeName(const char* baseMode)
+{
+    return StoryModeNameForDifficulty(baseMode, gStoryDifficultyIndex);
+}
+
 static void LoadBestTimes()
 {
     gBestTimes.clear();
@@ -528,6 +557,8 @@ static void LoadBestTimes()
             continue;
         if (mode == "Full TS story run" && name != "Total")
             continue;
+        if (mode.rfind("Full TS story run ", 0) == 0 && name != "Total")
+            continue;
         if (mode == "Full challenge run" && name != "Total")
             continue;
         if (name == "Unknown" || name == "Unknown Challenge")
@@ -559,6 +590,8 @@ static void RecordBestTime(const std::string& mode, const std::string& name, dou
     if (mode == "Challenge timer" || mode == "Challenge run")
         return;
     if (mode == "Full TS story run" && name != "Total")
+        return;
+    if (mode.rfind("Full TS story run ", 0) == 0 && name != "Total")
         return;
     if (mode == "Full challenge run" && name != "Total")
         return;
@@ -625,6 +658,7 @@ struct AutoSplitBridge
     bool initialized = false;
     bool available = false;
     ULONGLONG nextPollAt = 0;
+    ULONGLONG nextDifficultyPollAt = 0;
 
     ~AutoSplitBridge()
     {
@@ -726,6 +760,26 @@ struct AutoSplitBridge
             forceClear ? L"clear" : L"",
             &ret
         );
+    }
+
+    int GetStoryDifficulty(ULONGLONG nowMs)
+    {
+        if (nowMs < nextDifficultyPollAt)
+            return -1;
+
+        nextDifficultyPollAt = nowMs + 250;
+        if (!Init() || !runtime) return -1;
+
+        DWORD ret = 0;
+        HRESULT hr = runtime->ExecuteInDefaultAppDomain(
+            bridgePath,
+            L"TSRTimer.AutoSplitBridge",
+            L"GetStoryDifficulty",
+            L"",
+            &ret
+        );
+        if (FAILED(hr) || ret > 2) return -1;
+        return (int)ret;
     }
 };
 
@@ -1315,6 +1369,16 @@ static void DrawBestTimes(HWND hwnd)
     char timeText[32];
     char line[192];
 
+    auto DrawHeader = [&](const char* text) {
+        RECT row = rect;
+        row.left += ScaleUi(12);
+        row.right -= ScaleUi(12);
+        row.top = y;
+        SetTextColor(memDC, RGB(220, 110, 110));
+        DrawTextA(memDC, text, -1, &row, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS);
+        y += lineStep;
+    };
+
     auto DrawBestRow = [&](const std::string& mode, const std::string& name, const char* displayName) {
         double seconds = FindBestTimeSeconds(mode, name);
         FormatRunTimer(seconds, timeText, sizeof(timeText));
@@ -1329,10 +1393,18 @@ static void DrawBestTimes(HWND hwnd)
         y += lineStep;
     };
 
-    for (const char* routeName : kRouteNames)
-        DrawBestRow("Single story level run", routeName, routeName);
-    DrawBestRow("Full TS story run", "Total", "Full Story Total");
-    DrawBestRow("Full challenge run", "Total", "Full Challenge Total");
+    const char* difficulties[] = { "Easy", "Normal", "Hard" };
+    for (const char* difficulty : difficulties)
+    {
+        DrawHeader(difficulty);
+        std::string singleMode = std::string("Single story level run ") + difficulty;
+        std::string fullMode = std::string("Full TS story run ") + difficulty;
+        for (const char* routeName : kRouteNames)
+            DrawBestRow(singleMode, routeName, routeName);
+        DrawBestRow(fullMode, "Total", "Full Story Run");
+    }
+    DrawHeader("Challenge");
+    DrawBestRow("Full challenge run", "Total", "Full Challenge Run");
 
     SelectObject(memDC, buttonFont);
     auto DrawButton = [&](RECT& r, const char* text, COLORREF fill, COLORREF edge) {
@@ -1400,6 +1472,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
     std::atomic<bool> bridgeResetRequested(false);
     std::atomic<bool> bridgeForceClearRequested(false);
     std::atomic<bool> bridgeResetCompleted(false);
+    std::atomic<int> bridgeStoryDifficulty(-1);
     std::thread autoPollThread([&]() {
         AutoSplitBridge autoSplitWorker;
         while (autoPollRunning.load())
@@ -1415,7 +1488,11 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
                 continue;
             }
 
-            DWORD flags = autoSplitWorker.Poll(GetTickCount64());
+            ULONGLONG tick = GetTickCount64();
+            DWORD flags = autoSplitWorker.Poll(tick);
+            int difficulty = autoSplitWorker.GetStoryDifficulty(tick);
+            if (difficulty >= 0 && difficulty <= 2)
+                bridgeStoryDifficulty.store(difficulty);
             if (flags)
                 pendingAutoFlags.fetch_or(flags);
             Sleep(4);
@@ -1454,6 +1531,10 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
                          CurrentScreenHeight(),
                          SWP_NOZORDER | SWP_NOACTIVATE);
         }
+
+        int liveDifficulty = bridgeStoryDifficulty.load();
+        if (liveDifficulty >= 0 && liveDifficulty <= 2)
+            gStoryDifficultyIndex = liveDifficulty;
 
         double now = GetTimeSeconds();
         DWORD autoFlags = pendingAutoFlags.exchange(0);
@@ -1552,15 +1633,16 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
 
             gRunTimerSeconds = timerElapsed;
             UpdateCurrentGameName(gChallengeModeActive);
+            int splitDifficultyIndex = gStoryDifficultyIndex;
             if (gAppScreen == AppScreen::FullStoryTimer)
             {
                 std::string name = gCurrentGameName.empty() ? "Unknown" : gCurrentGameName;
-                RecordBestTime("Single story level run", name, timerElapsed);
+                RecordBestTime(StoryModeNameForDifficulty("Single story level run", splitDifficultyIndex), name, timerElapsed);
             }
             else if (gAppScreen == AppScreen::SingleLevelTimer)
             {
                 std::string name = gCurrentGameName.empty() ? "Unknown" : gCurrentGameName;
-                RecordBestTime(CurrentModeName(), name, timerElapsed);
+                RecordBestTime(StoryModeNameForDifficulty("Single story level run", splitDifficultyIndex), name, timerElapsed);
             }
 
             gFinishedRunTimes.push_back(timerElapsed);
@@ -1573,7 +1655,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
                 double total = 0.0;
                 for (double splitSeconds : gFinishedRunTimes)
                     total += splitSeconds;
-                RecordBestTime("Full TS story run", "Total", total);
+                RecordBestTime(StoryModeNameForDifficulty("Full TS story run", splitDifficultyIndex), "Total", total);
             }
             else if (gAppScreen == AppScreen::FullChallengeTimer && gFinishedRunTimes.size() == 32)
             {

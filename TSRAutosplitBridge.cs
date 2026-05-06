@@ -75,6 +75,10 @@ namespace TSRTimer
         static IntPtr[] gameStateProbeParentPtrs;
         static string[] gameStateProbeLabels;
         static uint[] lastGameStateProbeValues;
+        static IntPtr[] difficultyProbePtrs;
+        static IntPtr[] difficultyProbeParentPtrs;
+        static string[] difficultyProbeLabels;
+        static uint[] lastDifficultyProbeValues;
 
         static uint lastStartFlagValue;
         static uint lastSplitFlagValue;
@@ -131,6 +135,8 @@ namespace TSRTimer
         static string lastSplitParentDescription = "0x0";
         static string lastChallengeGameModeDescription = "0x0";
         static string lastChallengeMayhemDescription = "0x0";
+        static string lastDifficultyDescription = "Unknown";
+        static int currentStoryDifficultyIndex = -1;
         static string lastError = "";
         static string logPath = "";
         static string statePath = "";
@@ -242,6 +248,7 @@ namespace TSRTimer
 
                 if (ReadEventFlag(startFlagPtr, ref lastStartFlagValue))
                 {
+                    UpdateStoryDifficultyFromParent("storyStart", startParentPtr);
                     lastLoadingUnloadAt = now;
                     flags |= Loading;
                     Log("LOADING_UNLOAD world=" + worldName);
@@ -256,6 +263,7 @@ namespace TSRTimer
 
                 if (ReadEventFlag(splitFlagPtr, ref lastSplitFlagValue))
                 {
+                    UpdateStoryDifficultyFromParent("storySplit", splitParentPtr);
                     if (CompletedSplits.Add(worldName ?? ""))
                         flags |= Split;
                 }
@@ -426,6 +434,7 @@ namespace TSRTimer
                 menuEventThisPoll |= ReadEventFlag(menuStoryButtonPtr, ref lastMenuStoryButtonValue);
                 menuEventThisPoll |= ReadEventFlag(menuBackgroundPtr, ref lastMenuBackgroundValue);
                 PollDeepStateScan();
+                PollDifficultyProbes();
                 if (PollChallengeFinishProbes())
                     flags |= ChallengeSplit;
 
@@ -540,6 +549,32 @@ namespace TSRTimer
             return string.IsNullOrEmpty(lastError) ? 0 : lastError.Length;
         }
 
+        public static int GetStoryDifficulty(string unused)
+        {
+            try
+            {
+                Configure();
+                EnsureLoaded();
+                EnsureProcess();
+                if (process == null || process.HasExited)
+                    return currentStoryDifficultyIndex;
+
+                EnsureTools();
+                AddWorldWatcher();
+                uhara.Update();
+                UpdateWorldName();
+                UpdateStoryDifficultyFromParent("storyStart", startParentPtr);
+                UpdateStoryDifficultyFromParent("storySplit", splitParentPtr);
+                PollDifficultyProbes();
+                return currentStoryDifficultyIndex;
+            }
+            catch (Exception ex)
+            {
+                lastError = ex.GetType().Name + ": " + ex.Message;
+                return currentStoryDifficultyIndex;
+            }
+        }
+
         static void Configure()
         {
             if (baseDir != null)
@@ -620,6 +655,7 @@ namespace TSRTimer
             lastPublishedWorldName = "";
             lastChallengeGameModeDescription = "0x0";
             lastChallengeMayhemDescription = "0x0";
+            lastDifficultyDescription = "Unknown";
             CompletedSplits.Clear();
 
             startFlagPtr = IntPtr.Zero;
@@ -658,6 +694,10 @@ namespace TSRTimer
             gameStateProbeParentPtrs = null;
             gameStateProbeLabels = null;
             lastGameStateProbeValues = null;
+            difficultyProbePtrs = null;
+            difficultyProbeParentPtrs = null;
+            difficultyProbeLabels = null;
+            lastDifficultyProbeValues = null;
 
             lastStartFlagValue = 0;
             lastSplitFlagValue = 0;
@@ -834,6 +874,28 @@ namespace TSRTimer
                 challengeMayhemParentPtr
             };
             lastGameStateProbeValues = new uint[gameStateProbePtrs.Length];
+            difficultyProbeLabels = new string[] {
+                "EASY_EVENT",
+                "NORMAL_EVENT",
+                "HARD_EVENT",
+                "DIFFICULTY_EVENT",
+                "GAME_DIFFICULTY_EVENT"
+            };
+            difficultyProbePtrs = new IntPtr[] {
+                eventsTool.FunctionFlag("*Easy*", null, "*"),
+                eventsTool.FunctionFlag("*Normal*", null, "*"),
+                eventsTool.FunctionFlag("*Hard*", null, "*"),
+                eventsTool.FunctionFlag("*Difficulty*", null, "*"),
+                eventsTool.FunctionFlag("*GameDifficulty*", null, "*")
+            };
+            difficultyProbeParentPtrs = new IntPtr[] {
+                eventsTool.FunctionParentPtr("*Easy*", null, "*"),
+                eventsTool.FunctionParentPtr("*Normal*", null, "*"),
+                eventsTool.FunctionParentPtr("*Hard*", null, "*"),
+                eventsTool.FunctionParentPtr("*Difficulty*", null, "*"),
+                eventsTool.FunctionParentPtr("*GameDifficulty*", null, "*")
+            };
+            lastDifficultyProbeValues = new uint[difficultyProbePtrs.Length];
 
             lastStartFlagValue = ReadFlagValue(startFlagPtr);
             lastSplitFlagValue = ReadFlagValue(splitFlagPtr);
@@ -864,6 +926,8 @@ namespace TSRTimer
                 lastPlayerMovementProbeValues[i] = ReadFlagValue(playerMovementProbePtrs[i]);
             for (int i = 0; i < gameStateProbePtrs.Length; ++i)
                 lastGameStateProbeValues[i] = ReadFlagValue(gameStateProbePtrs[i]);
+            for (int i = 0; i < difficultyProbePtrs.Length; ++i)
+                lastDifficultyProbeValues[i] = ReadFlagValue(difficultyProbePtrs[i]);
             Log("registered challenge finish probes world=" + worldName);
         }
 
@@ -962,6 +1026,8 @@ namespace TSRTimer
 
             string text =
                 "world=" + (worldName ?? "") + Environment.NewLine +
+                "difficulty=" + DifficultyName(currentStoryDifficultyIndex) + Environment.NewLine +
+                "difficultySource=" + lastDifficultyDescription + Environment.NewLine +
                 "storyStart=" + lastStartParentDescription + Environment.NewLine +
                 "storySplit=" + lastSplitParentDescription + Environment.NewLine +
                 "challengeGameMode=" + lastChallengeGameModeDescription + Environment.NewLine +
@@ -1505,6 +1571,87 @@ namespace TSRTimer
                     " value=" + lastGameStateProbeValues[i] +
                     " world=" + worldName +
                     " parent=" + parent);
+            }
+        }
+
+        static void PollDifficultyProbes()
+        {
+            if (difficultyProbePtrs == null ||
+                difficultyProbeParentPtrs == null ||
+                difficultyProbeLabels == null ||
+                lastDifficultyProbeValues == null)
+                return;
+
+            for (int i = 0; i < difficultyProbePtrs.Length; ++i)
+            {
+                if (!ReadEventFlag(difficultyProbePtrs[i], ref lastDifficultyProbeValues[i]))
+                    continue;
+
+                string parent = i < difficultyProbeParentPtrs.Length
+                    ? DescribeUObject(ReadPointerValue(difficultyProbeParentPtrs[i]))
+                    : "";
+                int detected = DifficultyFromText(parent);
+                if (detected >= 0)
+                {
+                    currentStoryDifficultyIndex = detected;
+                    lastDifficultyDescription = difficultyProbeLabels[i] + " parent=" + parent;
+                    Log("DIFFICULTY_DETECTED " + DifficultyName(detected) +
+                        " source=" + lastDifficultyDescription);
+                }
+                else
+                {
+                    lastDifficultyDescription = difficultyProbeLabels[i] + " parent=" + parent;
+                    Log("DIFFICULTY_EVENT unknown source=" + lastDifficultyDescription);
+                }
+            }
+        }
+
+        static void UpdateStoryDifficultyFromParent(string source, IntPtr parentPtr)
+        {
+            IntPtr objectPtr = ReadPointerValue(parentPtr);
+            if (objectPtr == IntPtr.Zero)
+                return;
+
+            string parent = DescribeUObject(objectPtr);
+            int detected = DifficultyFromText(parent);
+            if (detected < 0)
+                return;
+
+            currentStoryDifficultyIndex = detected;
+            lastDifficultyDescription = source + " parent=" + parent;
+            Log("DIFFICULTY_DETECTED " + DifficultyName(detected) +
+                " source=" + lastDifficultyDescription);
+        }
+
+        static int DifficultyFromText(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return -1;
+
+            if (text.IndexOf("_StoryHard", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                text.IndexOf("StoryHard", StringComparison.OrdinalIgnoreCase) >= 0)
+                return 2;
+            if (text.IndexOf("_StoryNormal", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                text.IndexOf("StoryNormal", StringComparison.OrdinalIgnoreCase) >= 0)
+                return 1;
+            if (text.IndexOf("_Story", StringComparison.OrdinalIgnoreCase) >= 0)
+                return 0;
+            if (text.IndexOf("/Game/Maps/", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                text.IndexOf("/Game/Maps/Menu", StringComparison.OrdinalIgnoreCase) < 0 &&
+                text.IndexOf("Challenge", StringComparison.OrdinalIgnoreCase) < 0)
+                return 0;
+
+            return -1;
+        }
+
+        static string DifficultyName(int index)
+        {
+            switch (index)
+            {
+                case 0: return "Easy";
+                case 1: return "Normal";
+                case 2: return "Hard";
+                default: return "Unknown";
             }
         }
 

@@ -14,6 +14,14 @@ Modes
 - Full challenge run: 32 split rows for a full challenge route.
 - Best times: shows saved story best times.
 
+TSR-Timer asks the bridge for the current story difficulty and uses that for story best-time saving. The bridge detects story difficulty from the live story map descriptor:
+
+- `_Story` = Easy
+- `_StoryNormal` = Normal
+- `_StoryHard` = Hard
+
+TSR-Timer does not read the game's save file to decide difficulty.
+
 Autosplit Signals
 -----------------
 
@@ -55,9 +63,9 @@ Best times are stored beside the exe:
 
 `build/TSR-Timer-best-times.txt`
 
-Single story saves one best time per story level.
+Single story saves one best time per story level for the detected difficulty.
 
-Full story saves only the completed 9-level total under `Full TS story run | Total`. While running full story, each individual level split also updates the matching `Single story level run` best time.
+Full story saves only the completed 9-level total. The total is saved under the difficulty detected on the 9th/last story level. While running full story, each individual level split also updates the matching single story level best time for that level's detected difficulty.
 
 Challenge run does not save best times.
 
