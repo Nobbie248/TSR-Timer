@@ -12,12 +12,15 @@ Modes
 - Full TS story run: 9 split rows for a full story route.
 - Challenge run: one timer for challenge runs.
 - Full challenge run: 32 split rows for a full challenge route.
+- Best times: shows saved story best times.
 
-The bridge can detect story difficulty from live story map descriptors. This is currently used only for diagnostics while best-time saving is disabled:
+The bridge detects story difficulty from the live `TS_GameInstance_C` object:
 
-- `_Story` = Easy
-- `_StoryNormal` = Normal
-- `_StoryHard` = Hard
+- `TS_GameInstance_C + 0x38A = 0` = Easy
+- `TS_GameInstance_C + 0x38A = 1` = Normal
+- `TS_GameInstance_C + 0x38A = 2` = Hard
+
+The full address changes every game boot, so TSR-Timer finds `TS_GameInstance_C` first and then reads that offset inside it.
 
 TSR-Timer does not read the game's save file.
 
@@ -54,6 +57,21 @@ GameState stop probe:
 - `GameState + 0x318` changes from `0` to `256`
 
 The Challenge run stops when that GameState stop transition is detected.
+
+Best Times
+----------
+
+Best times are stored beside the exe:
+
+`build/TSR-Timer-best-times.txt`
+
+Single story saves one best time per story level for the detected difficulty.
+
+Full story saves only the completed 9-level total. The total is saved under the difficulty detected on the 9th/last story level. While running full story, each individual level split also updates the matching single story level best time for that level's detected difficulty.
+
+Challenge run does not save best times.
+
+Full challenge run saves only the completed 32-challenge total under `Full challenge run | Total`.
 
 Runtime Files
 -------------
@@ -93,9 +111,9 @@ True exclusive fullscreen may hide normal desktop overlays.
 Logging
 -------
 
-Event logging is off by default.
+Event logging is currently enabled for difficulty testing.
 
-To debug event timing, set `EnableEventLog` in `TSRAutosplitBridge.cs` to `true`, then rebuild.
+To turn event logging off, set `EnableEventLog` in `TSRAutosplitBridge.cs` to `false`, then rebuild.
 
 Build
 -----

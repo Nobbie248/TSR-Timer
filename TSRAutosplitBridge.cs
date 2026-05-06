@@ -22,7 +22,7 @@ namespace TSRTimer
         const double ChallengePulseMinSecondsAfterArm = 0.75;
         const int ChallengeSplit = 1 << 7;
         const int Error = 1 << 30;
-        static readonly bool EnableEventLog = false;
+        static readonly bool EnableEventLog = true;
         const uint MEM_COMMIT = 0x1000;
         const uint MEM_RESERVE = 0x2000;
         const uint PAGE_EXECUTE_READWRITE = 0x40;
@@ -140,6 +140,7 @@ namespace TSRTimer
         static int currentStoryDifficultyIndex = -1;
         static IntPtr storyGameInstancePtr;
         static byte[] storyGameInstanceSnapshot;
+        static int lastGameInstanceDifficultyByte = -1;
         static string lastError = "";
         static string logPath = "";
         static string statePath = "";
@@ -570,9 +571,9 @@ namespace TSRTimer
                 UpdateWorldName();
                 UpdateStoryDifficultyFromParent("storyStart", startParentPtr);
                 UpdateStoryDifficultyFromParent("storySplit", splitParentPtr);
+                PollDifficultyProbes();
                 UpdateStoryGameInstanceFromParent(startParentPtr);
                 PollStoryGameInstanceScan();
-                PollDifficultyProbes();
                 return currentStoryDifficultyIndex;
             }
             catch (Exception ex)
@@ -665,6 +666,7 @@ namespace TSRTimer
             lastDifficultyDescription = "Unknown";
             storyGameInstancePtr = IntPtr.Zero;
             storyGameInstanceSnapshot = null;
+            lastGameInstanceDifficultyByte = -1;
             CompletedSplits.Clear();
 
             startFlagPtr = IntPtr.Zero;
@@ -1675,8 +1677,11 @@ namespace TSRTimer
                 storyGameInstanceSnapshot = bytes;
                 Log("GAMEINSTANCE_SNAPSHOT ptr=0x" + storyGameInstancePtr.ToInt64().ToString("X") +
                     " size=0x" + scanSize.ToString("X"));
+                UpdateStoryDifficultyFromGameInstance(bytes);
                 return;
             }
+
+            UpdateStoryDifficultyFromGameInstance(bytes);
 
             int logged = 0;
             for (int offset = 0x30; offset + 4 <= scanSize; offset += 4)
@@ -1703,6 +1708,51 @@ namespace TSRTimer
             storyGameInstanceSnapshot = bytes;
         }
 
+        static void UpdateStoryDifficultyFromGameInstance(byte[] bytes)
+        {
+            const int difficultyOffset = 0x38A;
+            if (bytes == null || bytes.Length <= difficultyOffset)
+                return;
+
+            int raw = bytes[difficultyOffset];
+            if (raw != lastGameInstanceDifficultyByte)
+            {
+                string nearby = "";
+                for (int i = 0; i < 8 && difficultyOffset + i < bytes.Length; ++i)
+                {
+                    if (i > 0)
+                        nearby += " ";
+                    nearby += bytes[difficultyOffset + i].ToString("X2");
+                }
+
+                Log("GAMEINSTANCE_DIFFICULTY_BYTE off=0x" + difficultyOffset.ToString("X") +
+                    " raw=" + raw +
+                    " bytes=" + nearby +
+                    " mapped=" + DifficultyName(DifficultyFromGameInstanceByte(raw)));
+                lastGameInstanceDifficultyByte = raw;
+            }
+
+            int detected = DifficultyFromGameInstanceByte(raw);
+            if (detected < 0)
+                return;
+
+            currentStoryDifficultyIndex = detected;
+            lastDifficultyDescription = "GAMEINSTANCE_BYTE off=0x" + difficultyOffset.ToString("X") +
+                " raw=" + raw +
+                " parent=" + DescribeUObject(storyGameInstancePtr);
+        }
+
+        static int DifficultyFromGameInstanceByte(int raw)
+        {
+            switch (raw)
+            {
+                case 0: return 0;
+                case 1: return 1;
+                case 2: return 2;
+                default: return -1;
+            }
+        }
+
         static int DifficultyFromText(string text)
         {
             if (string.IsNullOrEmpty(text))
@@ -1720,6 +1770,8 @@ namespace TSRTimer
             if (text.IndexOf("_StoryNormal", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 text.IndexOf("StoryNormal", StringComparison.OrdinalIgnoreCase) >= 0)
                 return 1;
+            if (text.IndexOf("StoryAI", StringComparison.OrdinalIgnoreCase) >= 0)
+                return -1;
             if (text.IndexOf("_Story", StringComparison.OrdinalIgnoreCase) >= 0)
                 return 0;
 

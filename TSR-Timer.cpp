@@ -97,13 +97,14 @@ static const char* kChallengeRouteNames[32] = {
     "Cortez Can't Jump!",
     "TSUG"
 };
-static const int kModeCount = 4;
-static const bool kBestTimesEnabled = false;
-static const char* kModeNames[4] = {
+static const int kModeCount = 5;
+static const bool kBestTimesEnabled = true;
+static const char* kModeNames[5] = {
     "Single story level run",
     "Full TS story run",
     "Challenge run",
-    "Full challenge run"
+    "Full challenge run",
+    "Best times"
 };
 
 enum class AppScreen
@@ -514,6 +515,8 @@ static const char* StoryDifficultyNameForIndex(int difficultyIndex)
 
 static std::string StoryModeNameForDifficulty(const char* baseMode, int difficultyIndex)
 {
+    if (difficultyIndex < 0 || difficultyIndex >= 3)
+        return "";
     return std::string(baseMode) + " " + StoryDifficultyNameForIndex(difficultyIndex);
 }
 
@@ -837,20 +840,31 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             {
                 if (PointInRect(gModeButtonRects[i], x, y))
                 {
-                    if (i == 1)
-                        gAppScreen = AppScreen::FullStoryTimer;
-                    else if (i == 3)
-                        gAppScreen = AppScreen::FullChallengeTimer;
+                    if (i >= 0 && i <= 3)
+                    {
+                        if (i == 1)
+                            gAppScreen = AppScreen::FullStoryTimer;
+                        else if (i == 3)
+                            gAppScreen = AppScreen::FullChallengeTimer;
+                        else
+                            gAppScreen = AppScreen::SingleLevelTimer;
+                        gChallengeModeActive = (i == 2 || i == 3);
+                        gChallengeEnteredAt = gChallengeModeActive ? GetTimeSeconds() : -1.0;
+                        gScreenChanged = true;
+                        gFinishedRunTimes.clear();
+                        gRunTimerSeconds = 0.0;
+                        gRunTimerLineActive = false;
+                        gForceClearResetRequested = true;
+                        gResetTimerRequested = true;
+                    }
                     else
-                        gAppScreen = AppScreen::SingleLevelTimer;
-                    gChallengeModeActive = (i == 2 || i == 3);
-                    gChallengeEnteredAt = gChallengeModeActive ? GetTimeSeconds() : -1.0;
-                    gScreenChanged = true;
-                    gFinishedRunTimes.clear();
-                    gRunTimerSeconds = 0.0;
-                    gRunTimerLineActive = false;
-                    gForceClearResetRequested = true;
-                    gResetTimerRequested = true;
+                    {
+                        gAppScreen = AppScreen::BestTimes;
+                        gChallengeModeActive = false;
+                        gChallengeEnteredAt = -1.0;
+                        gScreenChanged = true;
+                        LoadBestTimes();
+                    }
                     InvalidateRect(hwnd, nullptr, FALSE);
                     return 0;
                 }
