@@ -73,6 +73,24 @@ Challenge run does not save best times.
 
 Full challenge run saves only the completed 32-challenge total under `Full challenge run | Total`.
 
+Route Logic
+-----------
+
+Full story:
+
+- Row 1 can start from the normal story loading-unload signal.
+- After a level split, the next row is locked until the game has shown a menu signal.
+- Loading/menu reset signals are ignored after row 1 so later rows do not wipe the run.
+- A menu cancel signal also blocks any start signal that arrives in the same poll, so the timer cannot start in the main menu.
+
+Full challenge:
+
+- A finished challenge is shown immediately and included in the displayed total.
+- The next row is not committed until the challenge/menu screen appears.
+- If the player retries before returning to menu, the same row is reused.
+- Row 32 commits and saves without needing another menu screen.
+- Pause menu events are protected by a short cooldown so pause/menu UI noise does not stop the timer.
+
 Runtime Files
 -------------
 

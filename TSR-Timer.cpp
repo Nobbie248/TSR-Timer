@@ -34,6 +34,9 @@ static std::string gCurrentGameName;
 static bool gRunTimerLineActive = false;
 static bool gResetTimerRequested = false;
 static bool gForceClearResetRequested = false;
+static bool gFullStoryMenuAfterFinish = false;
+static bool gFullChallengePendingSplit = false;
+static double gFullChallengePendingSeconds = 0.0;
 static int gOverlayScalePercent = 100;
 static bool gOverlayScaleChanged = false;
 
@@ -638,6 +641,32 @@ static void RecordBestTime(const std::string& mode, const std::string& name, dou
     SaveBestTimes();
 }
 
+static void RecordFullChallengeTotalIfComplete()
+{
+    if (gFinishedRunTimes.size() != 32)
+        return;
+
+    double total = 0.0;
+    for (double splitSeconds : gFinishedRunTimes)
+        total += QuantizeRunTimer(splitSeconds);
+    RecordBestTime("Full challenge run", "Total", total);
+}
+
+static void CommitFullChallengePendingSplit()
+{
+    if (!gFullChallengePendingSplit)
+        return;
+
+    gFinishedRunTimes.push_back(gFullChallengePendingSeconds);
+    if (gFinishedRunTimes.size() > 32)
+        gFinishedRunTimes.erase(gFinishedRunTimes.begin());
+
+    gFullChallengePendingSplit = false;
+    gFullChallengePendingSeconds = 0.0;
+    gRunTimerSeconds = 0.0;
+    RecordFullChallengeTotalIfComplete();
+}
+
 static double FindBestTimeSeconds(const std::string& mode, const std::string& name)
 {
     for (const BestTimeRecord& record : gBestTimes)
@@ -863,6 +892,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         gFinishedRunTimes.clear();
                         gRunTimerSeconds = 0.0;
                         gRunTimerLineActive = false;
+                        gFullStoryMenuAfterFinish = false;
+                        gFullChallengePendingSplit = false;
+                        gFullChallengePendingSeconds = 0.0;
                         gForceClearResetRequested = true;
                         gResetTimerRequested = true;
                     }
@@ -889,6 +921,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             gFinishedRunTimes.clear();
             gRunTimerSeconds = 0.0;
             gRunTimerLineActive = false;
+            gFullStoryMenuAfterFinish = false;
+            gFullChallengePendingSplit = false;
+            gFullChallengePendingSeconds = 0.0;
             gForceClearResetRequested = true;
             gResetTimerRequested = true;
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -904,6 +939,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             gFinishedRunTimes.clear();
             gRunTimerSeconds = 0.0;
             gRunTimerLineActive = false;
+            gFullStoryMenuAfterFinish = false;
+            gFullChallengePendingSplit = false;
+            gFullChallengePendingSeconds = 0.0;
             gForceClearResetRequested = true;
             gResetTimerRequested = true;
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -1163,7 +1201,10 @@ static void DrawOverlay(HWND hwnd)
         totalSeconds += QuantizeRunTimer(gFinishedRunTimes[i]);
 
     const size_t maxRows = (gAppScreen == AppScreen::FullChallengeTimer) ? 32 : 9;
-    size_t maxFinishedRows = gRunTimerLineActive ? maxRows - 1 : maxRows;
+    bool showRunningLine = gRunTimerLineActive || (!gFullChallengePendingSplit && gFinishedRunTimes.empty());
+    bool showPendingLine = gFullChallengePendingSplit;
+    size_t visibleExtraRows = (showRunningLine ? 1 : 0) + (showPendingLine ? 1 : 0);
+    size_t maxFinishedRows = visibleExtraRows >= maxRows ? 0 : maxRows - visibleExtraRows;
     size_t firstFinished = 0;
     if (gFinishedRunTimes.size() > maxFinishedRows)
         firstFinished = gFinishedRunTimes.size() - maxFinishedRows;
@@ -1176,7 +1217,14 @@ static void DrawOverlay(HWND hwnd)
         rowY += lineStep;
     }
 
-    if (gRunTimerLineActive || gFinishedRunTimes.empty())
+    if (showPendingLine)
+    {
+        DrawTimerLine(rowNumber++, gFullChallengePendingSeconds, rowY, RGB(255, 255, 255));
+        totalSeconds += QuantizeRunTimer(gFullChallengePendingSeconds);
+        rowY += lineStep;
+    }
+
+    if (showRunningLine)
     {
         DrawTimerLine(rowNumber++, gRunTimerSeconds, rowY, RGB(220, 110, 110));
         if (gRunTimerLineActive)
@@ -1575,6 +1623,9 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
             timerElapsed = 0.0;
             gRunTimerSeconds = 0.0;
             gRunTimerLineActive = false;
+            gFullStoryMenuAfterFinish = false;
+            gFullChallengePendingSplit = false;
+            gFullChallengePendingSeconds = 0.0;
         }
 
         if (gScreenChanged)
@@ -1606,37 +1657,82 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
 
         if ((autoFlags & AUTO_START_CANCELED) && !gChallengeModeActive)
         {
-            timerRunning = false;
-            timerElapsed = 0.0;
-            gRunTimerSeconds = 0.0;
-            gRunTimerLineActive = false;
+            autoFlags &= ~AUTO_STARTED;
+            if (gAppScreen == AppScreen::FullStoryTimer)
+            {
+                if (!timerRunning && !gFinishedRunTimes.empty())
+                    gFullStoryMenuAfterFinish = true;
+
+                if (gFinishedRunTimes.empty())
+                {
+                    timerRunning = false;
+                    timerElapsed = 0.0;
+                    gRunTimerSeconds = 0.0;
+                    gRunTimerLineActive = false;
+                }
+            }
+            else
+            {
+                timerRunning = false;
+                timerElapsed = 0.0;
+                gRunTimerSeconds = 0.0;
+                gRunTimerLineActive = false;
+            }
+        }
+        else if ((autoFlags & AUTO_START_CANCELED) && gAppScreen == AppScreen::FullChallengeTimer)
+        {
+            autoFlags &= ~AUTO_CHALLENGE_STARTED;
+            CommitFullChallengePendingSplit();
         }
 
         if ((autoFlags & AUTO_LOADING) && gChallengeModeActive)
         {
             pendingAutoFlags.exchange(0);
             autoFlags = 0;
-            if (gAppScreen != AppScreen::FullChallengeTimer)
-                gFinishedRunTimes.clear();
-            timerRunning = false;
-            timerElapsed = 0.0;
-            gRunTimerSeconds = 0.0;
-            gRunTimerLineActive = false;
+            bool allowRunningLoadingReset =
+                timerRunning &&
+                gAppScreen == AppScreen::FullChallengeTimer &&
+                gFinishedRunTimes.empty() &&
+                !gFullChallengePendingSplit;
+            if (!timerRunning || allowRunningLoadingReset)
+            {
+                if (gAppScreen != AppScreen::FullChallengeTimer)
+                    gFinishedRunTimes.clear();
+                timerRunning = false;
+                timerElapsed = 0.0;
+                if (!gFullChallengePendingSplit)
+                    gRunTimerSeconds = 0.0;
+                gRunTimerLineActive = false;
+            }
         }
         else if ((autoFlags & AUTO_LOADING) && !gChallengeModeActive)
         {
-            timerRunning = false;
-            timerElapsed = 0.0;
-            gRunTimerSeconds = 0.0;
-            gRunTimerLineActive = false;
+            if (gAppScreen != AppScreen::FullStoryTimer || gFinishedRunTimes.empty())
+            {
+                timerRunning = false;
+                timerElapsed = 0.0;
+                gRunTimerSeconds = 0.0;
+                gRunTimerLineActive = false;
+            }
         }
 
         DWORD startFlag = gChallengeModeActive ? AUTO_CHALLENGE_STARTED : AUTO_STARTED;
         DWORD splitFlag = gChallengeModeActive ? AUTO_CHALLENGE_SPLIT : AUTO_SPLIT;
 
         bool startAllowed = !gChallengeModeActive || (now - gChallengeEnteredAt) >= 2.0;
-        if ((autoFlags & startFlag) && startAllowed && !timerRunning)
+        bool fullStoryStartAllowed =
+            gAppScreen != AppScreen::FullStoryTimer ||
+            gFinishedRunTimes.empty() ||
+            gFullStoryMenuAfterFinish;
+        if ((autoFlags & startFlag) && startAllowed && fullStoryStartAllowed && !timerRunning)
         {
+            if (gAppScreen == AppScreen::FullChallengeTimer)
+            {
+                gFullChallengePendingSplit = false;
+                gFullChallengePendingSeconds = 0.0;
+            }
+            if (gAppScreen == AppScreen::FullStoryTimer)
+                gFullStoryMenuAfterFinish = false;
             timerRunning = true;
             timerStart = now;
             timerElapsed = 0.0;
@@ -1656,6 +1752,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
             int splitDifficultyIndex = gStoryDifficultyIndex;
             if (gAppScreen == AppScreen::FullStoryTimer)
             {
+                gFullStoryMenuAfterFinish = false;
                 std::string name = gCurrentGameName.empty() ? "Unknown" : gCurrentGameName;
                 RecordBestTime(StoryModeNameForDifficulty("Single story level run", splitDifficultyIndex), name, timerElapsed);
             }
@@ -1665,10 +1762,20 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
                 RecordBestTime(StoryModeNameForDifficulty("Single story level run", splitDifficultyIndex), name, timerElapsed);
             }
 
-            gFinishedRunTimes.push_back(timerElapsed);
-            size_t maxStoredRows = (gAppScreen == AppScreen::FullChallengeTimer) ? 32 : 9;
-            if (gFinishedRunTimes.size() > maxStoredRows)
-                gFinishedRunTimes.erase(gFinishedRunTimes.begin());
+            if (gAppScreen == AppScreen::FullChallengeTimer)
+            {
+                gFullChallengePendingSplit = true;
+                gFullChallengePendingSeconds = timerElapsed;
+                if (gFinishedRunTimes.size() + 1 >= 32)
+                    CommitFullChallengePendingSplit();
+            }
+            else
+            {
+                gFinishedRunTimes.push_back(timerElapsed);
+                size_t maxStoredRows = 9;
+                if (gFinishedRunTimes.size() > maxStoredRows)
+                    gFinishedRunTimes.erase(gFinishedRunTimes.begin());
+            }
 
             if (gAppScreen == AppScreen::FullStoryTimer && gFinishedRunTimes.size() == 9)
             {
@@ -1676,13 +1783,6 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
                 for (double splitSeconds : gFinishedRunTimes)
                     total += splitSeconds;
                 RecordBestTime(StoryModeNameForDifficulty("Full TS story run", splitDifficultyIndex), "Total", total);
-            }
-            else if (gAppScreen == AppScreen::FullChallengeTimer && gFinishedRunTimes.size() == 32)
-            {
-                double total = 0.0;
-                for (double splitSeconds : gFinishedRunTimes)
-                    total += splitSeconds;
-                RecordBestTime("Full challenge run", "Total", total);
             }
 
             timerRunning = false;

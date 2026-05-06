@@ -80,6 +80,10 @@ namespace TSRTimer
         static IntPtr[] difficultyProbeParentPtrs;
         static string[] difficultyProbeLabels;
         static uint[] lastDifficultyProbeValues;
+        static IntPtr[] inGameMenuProbePtrs;
+        static IntPtr[] inGameMenuProbeParentPtrs;
+        static string[] inGameMenuProbeLabels;
+        static uint[] lastInGameMenuProbeValues;
 
         static uint lastStartFlagValue;
         static uint lastSplitFlagValue;
@@ -104,6 +108,7 @@ namespace TSRTimer
         static DateTime challengeProbeStartedAt;
         static bool challengeProbeActive;
         static int challengeProbeLogCount;
+        static DateTime lastInGameMenuEventAt;
         static DateTime playerMovementProbeStartedAt;
         static int playerMovementProbeLogCount;
         static byte[] challengeStateSnapshot;
@@ -435,14 +440,36 @@ namespace TSRTimer
                 }
 
                 bool menuEventThisPoll = false;
-                menuEventThisPoll |= ReadEventFlag(menuMainMenuPtr, ref lastMenuMainMenuValue);
-                menuEventThisPoll |= ReadEventFlag(menuStorySelectPtr, ref lastMenuStorySelectValue);
-                menuEventThisPoll |= ReadEventFlag(menuStoryButtonPtr, ref lastMenuStoryButtonValue);
-                menuEventThisPoll |= ReadEventFlag(menuBackgroundPtr, ref lastMenuBackgroundValue);
+                if (ReadEventFlag(menuMainMenuPtr, ref lastMenuMainMenuValue))
+                {
+                    menuEventThisPoll = true;
+                    Log("MENU_EVENT MainMenu value=" + lastMenuMainMenuValue + " world=" + worldName);
+                }
+                if (ReadEventFlag(menuStorySelectPtr, ref lastMenuStorySelectValue))
+                {
+                    menuEventThisPoll = true;
+                    Log("MENU_EVENT StoryLevelSelect value=" + lastMenuStorySelectValue + " world=" + worldName);
+                }
+                if (ReadEventFlag(menuStoryButtonPtr, ref lastMenuStoryButtonValue))
+                {
+                    menuEventThisPoll = true;
+                    Log("MENU_EVENT StoryLevelButton value=" + lastMenuStoryButtonValue + " world=" + worldName);
+                }
+                if (ReadEventFlag(menuBackgroundPtr, ref lastMenuBackgroundValue))
+                {
+                    menuEventThisPoll = true;
+                    Log("MENU_EVENT MenuBackground value=" + lastMenuBackgroundValue + " world=" + worldName);
+                }
                 PollDeepStateScan();
                 PollDifficultyProbes();
+                PollInGameMenuProbes();
                 if (PollChallengeFinishProbes())
-                    flags |= ChallengeSplit;
+                {
+                    if (IsInGameMenuRecentlyActive())
+                        Log("CHALLENGE_SPLIT_SUPPRESSED_INGAME_MENU world=" + worldName);
+                    else
+                        flags |= ChallengeSplit;
+                }
 
                 if (menuEventThisPoll || IsMenuWorld(worldName))
                     flags |= StartCanceled;
@@ -710,6 +737,10 @@ namespace TSRTimer
             difficultyProbeParentPtrs = null;
             difficultyProbeLabels = null;
             lastDifficultyProbeValues = null;
+            inGameMenuProbePtrs = null;
+            inGameMenuProbeParentPtrs = null;
+            inGameMenuProbeLabels = null;
+            lastInGameMenuProbeValues = null;
 
             lastStartFlagValue = 0;
             lastSplitFlagValue = 0;
@@ -734,6 +765,7 @@ namespace TSRTimer
             challengeProbeStartedAt = DateTime.MinValue;
             challengeProbeActive = false;
             challengeProbeLogCount = 0;
+            lastInGameMenuEventAt = DateTime.MinValue;
             playerMovementProbeStartedAt = DateTime.MinValue;
             playerMovementProbeLogCount = 0;
             challengeStateSnapshot = null;
@@ -909,6 +941,37 @@ namespace TSRTimer
                 eventsTool.FunctionParentPtr("*GameDifficulty*", null, "*")
             };
             lastDifficultyProbeValues = new uint[difficultyProbePtrs.Length];
+            inGameMenuProbeLabels = new string[] {
+                "PAUSE_ANY_EVENT",
+                "PAUSE_MENU_EVENT",
+                "INGAME_MENU_EVENT",
+                "INGAME_ANY_EVENT",
+                "RETRY_EVENT",
+                "RESUME_EVENT",
+                "QUIT_EVENT",
+                "OPTIONS_EVENT"
+            };
+            inGameMenuProbePtrs = new IntPtr[] {
+                eventsTool.FunctionFlag("*Pause*", null, "*"),
+                eventsTool.FunctionFlag("*PauseMenu*", null, "*"),
+                eventsTool.FunctionFlag("*InGameMenu*", null, "*"),
+                eventsTool.FunctionFlag("*InGame*", null, "*"),
+                eventsTool.FunctionFlag("*Retry*", null, "*"),
+                eventsTool.FunctionFlag("*Resume*", null, "*"),
+                eventsTool.FunctionFlag("*Quit*", null, "*"),
+                eventsTool.FunctionFlag("*Options*", null, "*")
+            };
+            inGameMenuProbeParentPtrs = new IntPtr[] {
+                eventsTool.FunctionParentPtr("*Pause*", null, "*"),
+                eventsTool.FunctionParentPtr("*PauseMenu*", null, "*"),
+                eventsTool.FunctionParentPtr("*InGameMenu*", null, "*"),
+                eventsTool.FunctionParentPtr("*InGame*", null, "*"),
+                eventsTool.FunctionParentPtr("*Retry*", null, "*"),
+                eventsTool.FunctionParentPtr("*Resume*", null, "*"),
+                eventsTool.FunctionParentPtr("*Quit*", null, "*"),
+                eventsTool.FunctionParentPtr("*Options*", null, "*")
+            };
+            lastInGameMenuProbeValues = new uint[inGameMenuProbePtrs.Length];
 
             lastStartFlagValue = ReadFlagValue(startFlagPtr);
             lastSplitFlagValue = ReadFlagValue(splitFlagPtr);
@@ -942,6 +1005,8 @@ namespace TSRTimer
                 lastGameStateProbeValues[i] = ReadFlagValue(gameStateProbePtrs[i]);
             for (int i = 0; i < difficultyProbePtrs.Length; ++i)
                 lastDifficultyProbeValues[i] = ReadFlagValue(difficultyProbePtrs[i]);
+            for (int i = 0; i < inGameMenuProbePtrs.Length; ++i)
+                lastInGameMenuProbeValues[i] = ReadFlagValue(inGameMenuProbePtrs[i]);
             Log("registered challenge finish probes world=" + worldName);
         }
 
@@ -1621,6 +1686,46 @@ namespace TSRTimer
                     Log("DIFFICULTY_EVENT unknown source=" + lastDifficultyDescription);
                 }
             }
+        }
+
+        static void PollInGameMenuProbes()
+        {
+            if (inGameMenuProbePtrs == null ||
+                inGameMenuProbeParentPtrs == null ||
+                inGameMenuProbeLabels == null ||
+                lastInGameMenuProbeValues == null)
+                return;
+
+            for (int i = 0; i < inGameMenuProbePtrs.Length; ++i)
+            {
+                if (!ReadEventFlag(inGameMenuProbePtrs[i], ref lastInGameMenuProbeValues[i]))
+                    continue;
+
+                string parent = i < inGameMenuProbeParentPtrs.Length
+                    ? DescribeUObject(ReadPointerValue(inGameMenuProbeParentPtrs[i]))
+                    : "";
+                if (IsInGameMenuProbeParent(parent))
+                    lastInGameMenuEventAt = DateTime.UtcNow;
+                Log("INGAME_MENU_PROBE " + inGameMenuProbeLabels[i] +
+                    " value=" + lastInGameMenuProbeValues[i] +
+                    " world=" + worldName +
+                    " parent=" + parent);
+            }
+        }
+
+        static bool IsInGameMenuProbeParent(string parent)
+        {
+            if (string.IsNullOrEmpty(parent))
+                return false;
+
+            return parent.IndexOf("TestPauseMenu_C", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   parent.IndexOf("InGameMenu_C", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        static bool IsInGameMenuRecentlyActive()
+        {
+            return lastInGameMenuEventAt != DateTime.MinValue &&
+                   (DateTime.UtcNow - lastInGameMenuEventAt).TotalSeconds <= 3.5;
         }
 
         static void UpdateStoryDifficultyFromParent(string source, IntPtr parentPtr)
