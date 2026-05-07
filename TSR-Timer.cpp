@@ -37,6 +37,8 @@ static bool gForceClearResetRequested = false;
 static bool gFullStoryMenuAfterFinish = false;
 static bool gFullChallengePendingSplit = false;
 static double gFullChallengePendingSeconds = 0.0;
+static bool gFullChallengeReadyAfterLoading = false;
+static bool gFullChallengeWaitingForReadyLoading = false;
 static int gOverlayScalePercent = 100;
 static bool gOverlayScaleChanged = false;
 
@@ -663,6 +665,8 @@ static void CommitFullChallengePendingSplit()
 
     gFullChallengePendingSplit = false;
     gFullChallengePendingSeconds = 0.0;
+    if (gFinishedRunTimes.size() < 32)
+        gFullChallengeWaitingForReadyLoading = true;
     gRunTimerSeconds = 0.0;
     RecordFullChallengeTotalIfComplete();
 }
@@ -895,6 +899,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         gFullStoryMenuAfterFinish = false;
                         gFullChallengePendingSplit = false;
                         gFullChallengePendingSeconds = 0.0;
+                        gFullChallengeReadyAfterLoading = false;
+                        gFullChallengeWaitingForReadyLoading = false;
                         gForceClearResetRequested = true;
                         gResetTimerRequested = true;
                     }
@@ -924,6 +930,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             gFullStoryMenuAfterFinish = false;
             gFullChallengePendingSplit = false;
             gFullChallengePendingSeconds = 0.0;
+            gFullChallengeReadyAfterLoading = false;
+            gFullChallengeWaitingForReadyLoading = false;
             gForceClearResetRequested = true;
             gResetTimerRequested = true;
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -942,6 +950,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             gFullStoryMenuAfterFinish = false;
             gFullChallengePendingSplit = false;
             gFullChallengePendingSeconds = 0.0;
+            gFullChallengeReadyAfterLoading = false;
+            gFullChallengeWaitingForReadyLoading = false;
             gForceClearResetRequested = true;
             gResetTimerRequested = true;
             InvalidateRect(hwnd, nullptr, FALSE);
@@ -1201,9 +1211,17 @@ static void DrawOverlay(HWND hwnd)
         totalSeconds += QuantizeRunTimer(gFinishedRunTimes[i]);
 
     const size_t maxRows = (gAppScreen == AppScreen::FullChallengeTimer) ? 32 : 9;
-    bool showRunningLine = gRunTimerLineActive || (!gFullChallengePendingSplit && gFinishedRunTimes.empty());
+    bool showRunningLine = gRunTimerLineActive ||
+        (!gFullChallengePendingSplit && gFinishedRunTimes.empty());
     bool showPendingLine = gFullChallengePendingSplit;
-    size_t visibleExtraRows = (showRunningLine ? 1 : 0) + (showPendingLine ? 1 : 0);
+    bool showReadyLine =
+        gAppScreen == AppScreen::FullChallengeTimer &&
+        gFullChallengeReadyAfterLoading &&
+        !gRunTimerLineActive &&
+        gFinishedRunTimes.size() + (gFullChallengePendingSplit ? 1 : 0) < maxRows;
+    size_t visibleExtraRows = (showRunningLine ? 1 : 0) +
+        (showPendingLine ? 1 : 0) +
+        (showReadyLine ? 1 : 0);
     size_t maxFinishedRows = visibleExtraRows >= maxRows ? 0 : maxRows - visibleExtraRows;
     size_t firstFinished = 0;
     if (gFinishedRunTimes.size() > maxFinishedRows)
@@ -1221,6 +1239,12 @@ static void DrawOverlay(HWND hwnd)
     {
         DrawTimerLine(rowNumber++, gFullChallengePendingSeconds, rowY, RGB(255, 255, 255));
         totalSeconds += QuantizeRunTimer(gFullChallengePendingSeconds);
+        rowY += lineStep;
+    }
+
+    if (showReadyLine)
+    {
+        DrawTimerLine(rowNumber++, 0.0, rowY, RGB(220, 110, 110));
         rowY += lineStep;
     }
 
@@ -1626,6 +1650,8 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
             gFullStoryMenuAfterFinish = false;
             gFullChallengePendingSplit = false;
             gFullChallengePendingSeconds = 0.0;
+            gFullChallengeReadyAfterLoading = false;
+            gFullChallengeWaitingForReadyLoading = false;
         }
 
         if (gScreenChanged)
@@ -1689,6 +1715,12 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
         {
             pendingAutoFlags.exchange(0);
             autoFlags = 0;
+            if (gAppScreen == AppScreen::FullChallengeTimer &&
+                (gFullChallengePendingSplit || gFullChallengeWaitingForReadyLoading))
+            {
+                gFullChallengeReadyAfterLoading = true;
+                gFullChallengeWaitingForReadyLoading = false;
+            }
             bool allowRunningLoadingReset =
                 timerRunning &&
                 gAppScreen == AppScreen::FullChallengeTimer &&
@@ -1707,7 +1739,12 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
         }
         else if ((autoFlags & AUTO_LOADING) && !gChallengeModeActive)
         {
-            if (gAppScreen != AppScreen::FullStoryTimer || gFinishedRunTimes.empty())
+            bool keepRunningFullStory =
+                gAppScreen == AppScreen::FullStoryTimer &&
+                !gFinishedRunTimes.empty() &&
+                timerRunning;
+            if (!keepRunningFullStory &&
+                (gAppScreen != AppScreen::FullStoryTimer || gFinishedRunTimes.empty()))
             {
                 timerRunning = false;
                 timerElapsed = 0.0;
@@ -1719,7 +1756,14 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
         DWORD startFlag = gChallengeModeActive ? AUTO_CHALLENGE_STARTED : AUTO_STARTED;
         DWORD splitFlag = gChallengeModeActive ? AUTO_CHALLENGE_SPLIT : AUTO_SPLIT;
 
-        bool startAllowed = !gChallengeModeActive || (now - gChallengeEnteredAt) >= 2.0;
+        if ((autoFlags & startFlag) &&
+            gAppScreen == AppScreen::FullChallengeTimer &&
+            gFullChallengePendingSplit)
+        {
+            gFullChallengeReadyAfterLoading = true;
+        }
+
+        bool startAllowed = !gChallengeModeActive || (now - gChallengeEnteredAt) >= 0.10;
         bool fullStoryStartAllowed =
             gAppScreen != AppScreen::FullStoryTimer ||
             gFinishedRunTimes.empty() ||
@@ -1730,6 +1774,8 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
             {
                 gFullChallengePendingSplit = false;
                 gFullChallengePendingSeconds = 0.0;
+                gFullChallengeReadyAfterLoading = false;
+                gFullChallengeWaitingForReadyLoading = false;
             }
             if (gAppScreen == AppScreen::FullStoryTimer)
                 gFullStoryMenuAfterFinish = false;
@@ -1766,6 +1812,8 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
             {
                 gFullChallengePendingSplit = true;
                 gFullChallengePendingSeconds = timerElapsed;
+                gFullChallengeReadyAfterLoading = false;
+                gFullChallengeWaitingForReadyLoading = true;
                 if (gFinishedRunTimes.size() + 1 >= 32)
                     CommitFullChallengePendingSplit();
             }

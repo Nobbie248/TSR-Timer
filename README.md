@@ -80,7 +80,7 @@ Full story:
 
 - Row 1 can start from the normal story loading-unload signal.
 - After a level split, the next row is locked until the game has shown a menu signal.
-- Loading/menu reset signals are ignored after row 1 so later rows do not wipe the run.
+- Loading/unload signals can reset row 1, but they do not stop a running timer on row 2 onward.
 - A menu cancel signal also blocks any start signal that arrives in the same poll, so the timer cannot start in the main menu.
 
 Full challenge:

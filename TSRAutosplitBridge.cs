@@ -84,6 +84,12 @@ namespace TSRTimer
         static IntPtr[] inGameMenuProbeParentPtrs;
         static string[] inGameMenuProbeLabels;
         static uint[] lastInGameMenuProbeValues;
+        static IntPtr pauseMenuStateObjectPtr;
+        static byte[] pauseMenuStateSnapshot;
+        static IntPtr inGameMenuStateObjectPtr;
+        static byte[] inGameMenuStateSnapshot;
+        static bool pauseMenuStateActive;
+        static DateTime lastPauseMenuStateActiveAt;
 
         static uint lastStartFlagValue;
         static uint lastSplitFlagValue;
@@ -130,6 +136,7 @@ namespace TSRTimer
         static uint lastGameState318Value;
         static bool gameStateStopReady;
         static bool gameModeStateFinishArmed;
+        static bool challengeSplitIgnoresPause;
         static byte[] lastGraphicsSample;
         static DateTime lastGraphicsSampleAt;
         static bool graphicsSampleReady;
@@ -233,6 +240,7 @@ namespace TSRTimer
             public IntPtr ObjectPtr;
             public byte[] Snapshot;
             public bool LogBeforeFinish;
+            public int LogLimit;
         }
 
         public static int Poll(string config)
@@ -298,19 +306,30 @@ namespace TSRTimer
                         }
                     }
 
-                    bool recentPending =
-                        pendingChallengeCountdownArmedAt != DateTime.MinValue &&
-                        (now - pendingChallengeCountdownArmedAt).TotalSeconds <= 8.0;
-                    if (countdownDestructEvent && recentPending)
-                    {
-                        Log("CHALLENGE_RESTART_COUNTDOWN_DESTRUCT pending world=" + worldName);
-                    }
-                    else if (countdownFinishEvent && recentPending)
-                    {
-                        pendingChallengeCountdownFinishCount++;
-                        Log("CHALLENGE_RESTART_COUNTDOWN pending count=" +
-                            pendingChallengeCountdownFinishCount + " world=" + worldName);
-                    }
+                }
+
+                bool recentPendingRestart =
+                    pendingChallengeCountdownArmedAt != DateTime.MinValue &&
+                    (now - pendingChallengeCountdownArmedAt).TotalSeconds <= 8.0;
+                if (countdownDestructEvent && recentPendingRestart)
+                {
+                    Log("CHALLENGE_RESTART_COUNTDOWN_DESTRUCT pending world=" + worldName);
+                }
+                else if (countdownFinishEvent && recentPendingRestart)
+                {
+                    pendingChallengeCountdownFinishCount++;
+                    Log("CHALLENGE_RESTART_COUNTDOWN pending count=" +
+                        pendingChallengeCountdownFinishCount + " world=" + worldName);
+                    challengeCountdownArmedAt = pendingChallengeCountdownArmedAt;
+                    challengeCountdownFinishCount = pendingChallengeCountdownFinishCount;
+                    pendingChallengeCountdownArmedAt = DateTime.MinValue;
+                    pendingChallengeCountdownFinishCount = 0;
+                    challengeProbeActive = false;
+                    challengeProbeStartedAt = DateTime.MinValue;
+                    challengeProbeLogCount = 0;
+                    challengeStateStartSignal = false;
+                    playerMovementStartSignal = false;
+                    Log("CHALLENGE_RESTART_COUNTDOWN promoted_start_arm world=" + worldName);
                 }
 
                 if (challengeStartEvent && !challengeProbeActive)
@@ -463,9 +482,18 @@ namespace TSRTimer
                 PollDeepStateScan();
                 PollDifficultyProbes();
                 PollInGameMenuProbes();
-                if (PollChallengeFinishProbes())
+                PollPauseMenuStateScan();
+                challengeSplitIgnoresPause = false;
+                bool restartCountdownPending =
+                    pendingChallengeCountdownArmedAt != DateTime.MinValue &&
+                    (now - pendingChallengeCountdownArmedAt).TotalSeconds <= 8.0;
+                if (restartCountdownPending)
                 {
-                    if (IsInGameMenuRecentlyActive())
+                    Log("CHALLENGE_SPLIT_SUPPRESSED_RESTART_PENDING world=" + worldName);
+                }
+                else if (PollChallengeFinishProbes())
+                {
+                    if (!challengeSplitIgnoresPause && IsInGameMenuRecentlyActive())
                         Log("CHALLENGE_SPLIT_SUPPRESSED_INGAME_MENU world=" + worldName);
                     else
                         flags |= ChallengeSplit;
@@ -741,6 +769,10 @@ namespace TSRTimer
             inGameMenuProbeParentPtrs = null;
             inGameMenuProbeLabels = null;
             lastInGameMenuProbeValues = null;
+            pauseMenuStateObjectPtr = IntPtr.Zero;
+            pauseMenuStateSnapshot = null;
+            inGameMenuStateObjectPtr = IntPtr.Zero;
+            inGameMenuStateSnapshot = null;
 
             lastStartFlagValue = 0;
             lastSplitFlagValue = 0;
@@ -766,6 +798,8 @@ namespace TSRTimer
             challengeProbeActive = false;
             challengeProbeLogCount = 0;
             lastInGameMenuEventAt = DateTime.MinValue;
+            pauseMenuStateActive = false;
+            lastPauseMenuStateActiveAt = DateTime.MinValue;
             playerMovementProbeStartedAt = DateTime.MinValue;
             playerMovementProbeLogCount = 0;
             challengeStateSnapshot = null;
@@ -786,6 +820,7 @@ namespace TSRTimer
             lastGameState318Value = 0;
             gameStateStopReady = false;
             gameModeStateFinishArmed = false;
+            challengeSplitIgnoresPause = false;
             lastGraphicsSample = null;
             lastGraphicsSampleAt = DateTime.MinValue;
             graphicsSampleReady = false;
@@ -987,15 +1022,15 @@ namespace TSRTimer
             lastChallengeAwardWidgetValue = ReadFlagValue(challengeAwardWidgetPtr);
             lastChallengeGameModeAnyValue = ReadFlagValue(challengeGameModeAnyPtr);
             deepScanTargets = new DeepScanTarget[] {
-                new DeepScanTarget { Name = "TS_ChallengeMayhem_C", ParentPtr = challengeMayhemParentPtr },
-                new DeepScanTarget { Name = "TS_ChallengeGameMode_C", ParentPtr = challengeGameModeParentPtr },
-                new DeepScanTarget { Name = "TS_HudTimeCounter_C/TS_TimeCounter", ParentPtr = hudTimeCounterParentPtr },
-                new DeepScanTarget { Name = "GameState", ParentPtr = gameStateParentPtr },
-                new DeepScanTarget { Name = "TS_GameState_C", ParentPtr = tsGameStateParentPtr },
+                new DeepScanTarget { Name = "TS_ChallengeMayhem_C", ParentPtr = challengeMayhemParentPtr, LogBeforeFinish = true, LogLimit = 48 },
+                new DeepScanTarget { Name = "TS_ChallengeGameMode_C", ParentPtr = challengeGameModeParentPtr, LogBeforeFinish = true, LogLimit = 64 },
+                new DeepScanTarget { Name = "TS_HudTimeCounter_C/TS_TimeCounter", ParentPtr = hudTimeCounterParentPtr, LogBeforeFinish = true, LogLimit = 48 },
+                new DeepScanTarget { Name = "GameState", ParentPtr = gameStateParentPtr, LogBeforeFinish = true, LogLimit = 96 },
+                new DeepScanTarget { Name = "TS_GameState_C", ParentPtr = tsGameStateParentPtr, LogBeforeFinish = true, LogLimit = 96 },
                 new DeepScanTarget { Name = "TS_GameInstance_C", ParentPtr = gameInstanceParentPtr, LogBeforeFinish = true },
                 new DeepScanTarget { Name = "BroadState", ParentPtr = broadStateParentPtr },
                 new DeepScanTarget { Name = "CharacterMovementComponent/CharMoveComp", ParentPtr = characterMovementParentPtr, LogBeforeFinish = true },
-                new DeepScanTarget { Name = "AwardWidget_C", ParentPtr = challengeAwardWidgetParentPtr }
+                new DeepScanTarget { Name = "AwardWidget_C", ParentPtr = challengeAwardWidgetParentPtr, LogBeforeFinish = true, LogLimit = 48 }
             };
             for (int i = 0; i < challengeFinishProbePtrs.Length; ++i)
                 lastChallengeFinishProbeValues[i] = ReadFlagValue(challengeFinishProbePtrs[i]);
@@ -1581,8 +1616,7 @@ namespace TSRTimer
             if (PollGameStateStop())
                 return true;
 
-            if (PollHudTimeCounterStop())
-                return true;
+            PollHudTimeCounterStop();
 
             PollGameModeFinishOffset();
             PollGameStateProbes();
@@ -1704,13 +1738,121 @@ namespace TSRTimer
                 string parent = i < inGameMenuProbeParentPtrs.Length
                     ? DescribeUObject(ReadPointerValue(inGameMenuProbeParentPtrs[i]))
                     : "";
-                if (IsInGameMenuProbeParent(parent))
+                if (IsInGameMenuCooldownProbe(inGameMenuProbeLabels[i]) && IsInGameMenuProbeParent(parent))
                     lastInGameMenuEventAt = DateTime.UtcNow;
-                Log("INGAME_MENU_PROBE " + inGameMenuProbeLabels[i] +
-                    " value=" + lastInGameMenuProbeValues[i] +
-                    " world=" + worldName +
-                    " parent=" + parent);
+                if (inGameMenuProbeLabels[i] != "PAUSE_ANY_EVENT" &&
+                    inGameMenuProbeLabels[i] != "PAUSE_MENU_EVENT")
+                {
+                    Log("INGAME_MENU_PROBE " + inGameMenuProbeLabels[i] +
+                        " value=" + lastInGameMenuProbeValues[i] +
+                        " world=" + worldName +
+                        " parent=" + parent);
+                }
             }
+        }
+
+        static void PollPauseMenuStateScan()
+        {
+            if (inGameMenuProbeParentPtrs == null || inGameMenuProbeParentPtrs.Length < 2)
+                return;
+
+            IntPtr pauseMenuPtr = ReadPointerValue(inGameMenuProbeParentPtrs[1]);
+            if (pauseMenuPtr == IntPtr.Zero)
+                SetPauseMenuStateActive(false, "ptr_zero");
+            PollPauseStateObject("PAUSE_MENU_STATE", pauseMenuPtr,
+                ref pauseMenuStateObjectPtr, ref pauseMenuStateSnapshot);
+
+            if (inGameMenuProbeParentPtrs.Length >= 3)
+            {
+                PollPauseStateObject("INGAME_MENU_STATE", ReadPointerValue(inGameMenuProbeParentPtrs[2]),
+                    ref inGameMenuStateObjectPtr, ref inGameMenuStateSnapshot);
+            }
+        }
+
+        static void PollPauseStateObject(string name, IntPtr objectPtr, ref IntPtr knownObjectPtr, ref byte[] snapshot)
+        {
+            if (objectPtr == IntPtr.Zero)
+                return;
+
+            const int scanSize = 0x500;
+            byte[] bytes = ReadBytes(objectPtr, scanSize);
+            if (bytes == null)
+                return;
+
+            if (knownObjectPtr != objectPtr || snapshot == null)
+            {
+                knownObjectPtr = objectPtr;
+                snapshot = bytes;
+                UpdatePauseMenuStateActive(name, bytes, "target");
+                Log(name + "_TARGET ptr=0x" + objectPtr.ToInt64().ToString("X") +
+                    " " + DescribeUObject(objectPtr));
+                return;
+            }
+
+            UpdatePauseMenuStateActive(name, bytes, "poll");
+
+            int logged = 0;
+            int logLimit = string.Equals(name, "PAUSE_MENU_STATE", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(name, "INGAME_MENU_STATE", StringComparison.OrdinalIgnoreCase)
+                    ? 160
+                    : 32;
+            for (int offset = 0x30; offset < bytes.Length && logged < logLimit; ++offset)
+            {
+                byte oldByte = snapshot[offset];
+                byte newByte = bytes[offset];
+                if (oldByte == newByte)
+                    continue;
+
+                uint oldU32 = 0;
+                uint newU32 = 0;
+                if (offset + 4 <= bytes.Length)
+                {
+                    oldU32 = BitConverter.ToUInt32(snapshot, offset);
+                    newU32 = BitConverter.ToUInt32(bytes, offset);
+                }
+
+                Log(name + "_CHANGE off=0x" + offset.ToString("X") +
+                    " byte=" + oldByte + "->" + newByte +
+                    " u32=" + oldU32 + "->" + newU32);
+                logged++;
+            }
+
+            if (logged >= logLimit)
+                Log(name + "_CHANGE_LIMIT more_changes_suppressed");
+
+            snapshot = bytes;
+        }
+
+        static void UpdatePauseMenuStateActive(string name, byte[] bytes, string source)
+        {
+            if (bytes == null)
+                return;
+
+            if (string.Equals(name, "INGAME_MENU_STATE", StringComparison.OrdinalIgnoreCase))
+            {
+                if (bytes.Length <= 0x2B7)
+                    return;
+
+                ulong childPtr = BitConverter.ToUInt64(bytes, 0x2B0);
+                bool active = childPtr != 0;
+                SetPauseMenuStateActive(active,
+                    source + " InGameMenu+2B0=0x" + childPtr.ToString("X"));
+            }
+        }
+
+        static void SetPauseMenuStateActive(bool active, string reason)
+        {
+            if (pauseMenuStateActive == active)
+            {
+                if (active)
+                    lastPauseMenuStateActiveAt = DateTime.UtcNow;
+                return;
+            }
+
+            pauseMenuStateActive = active;
+            if (active)
+                lastPauseMenuStateActiveAt = DateTime.UtcNow;
+            Log("PAUSE_MENU_ACTIVE " + (active ? "1" : "0") + " " + reason);
         }
 
         static bool IsInGameMenuProbeParent(string parent)
@@ -1722,10 +1864,31 @@ namespace TSRTimer
                    parent.IndexOf("InGameMenu_C", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
+        static bool IsInGameMenuCooldownProbe(string label)
+        {
+            return string.Equals(label, "PAUSE_MENU_EVENT", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(label, "INGAME_MENU_EVENT", StringComparison.OrdinalIgnoreCase);
+        }
+
         static bool IsInGameMenuRecentlyActive()
         {
-            return lastInGameMenuEventAt != DateTime.MinValue &&
-                   (DateTime.UtcNow - lastInGameMenuEventAt).TotalSeconds <= 3.5;
+            if (ChallengeHudTimerRecentlyMoved())
+                return false;
+
+            return pauseMenuStateActive ||
+                   (lastPauseMenuStateActiveAt != DateTime.MinValue &&
+                    (DateTime.UtcNow - lastPauseMenuStateActiveAt).TotalSeconds <= 0.10);
+        }
+
+        static bool ChallengeHudTimerRecentlyMoved()
+        {
+            return ChallengeHudTimerMovedWithin(0.10);
+        }
+
+        static bool ChallengeHudTimerMovedWithin(double seconds)
+        {
+            return lastHudTimeCounterChangedAt != DateTime.MinValue &&
+                   (DateTime.UtcNow - lastHudTimeCounterChangedAt).TotalSeconds <= seconds;
         }
 
         static void UpdateStoryDifficultyFromParent(string source, IntPtr parentPtr)
@@ -2007,6 +2170,7 @@ namespace TSRTimer
             }
 
             int logged = 0;
+            int logLimit = target.LogLimit > 0 ? target.LogLimit : 12;
             for (int offset = 0x30; offset + 4 <= scanSize; offset += 4)
             {
                 uint oldValue = BitConverter.ToUInt32(target.Snapshot, offset);
@@ -2014,7 +2178,7 @@ namespace TSRTimer
                 if (oldValue == newValue)
                     continue;
 
-                if (logged < 12)
+                if (logged < logLimit)
                 {
                     Log("DEEP_CHANGE " + target.Name +
                         " t=" + elapsed.ToString("0.000") +
@@ -2026,7 +2190,7 @@ namespace TSRTimer
                 }
             }
 
-            if (logged >= 12)
+            if (logged >= logLimit)
             {
                 Log("DEEP_CHANGE_LIMIT " + target.Name +
                     " t=" + elapsed.ToString("0.000") +
@@ -2109,13 +2273,22 @@ namespace TSRTimer
                     sinceChange >= 1.12 &&
                     !hudTimeCounterStallLogged)
                 {
+                    if (IsInGameMenuRecentlyActive())
+                    {
+                        Log("CHALLENGE_SPLIT_PENDING_INGAME_MENU HUD_TIMER_240_STALLED t=" +
+                            elapsed.ToString("0.000") +
+                            " since_change=" + sinceChange.ToString("0.000") +
+                            " f32=" + UIntToFloatText(value) +
+                            " world=" + worldName);
+                        return false;
+                    }
+
                     hudTimeCounterStallLogged = true;
-                    Log("CHALLENGE_SPLIT HUD_TIMER_240_STALLED t=" + elapsed.ToString("0.000") +
+                    Log("CHALLENGE_HUD_TIMER_240_STALLED t=" + elapsed.ToString("0.000") +
                         " since_change=" + sinceChange.ToString("0.000") +
                         " f32=" + UIntToFloatText(value) +
                         " world=" + worldName);
-                    challengeProbeActive = false;
-                    return true;
+                    return false;
                 }
                 return false;
             }
@@ -2124,6 +2297,8 @@ namespace TSRTimer
             lastHudTimeCounterValue = value;
             lastHudTimeCounterChangedAt = DateTime.UtcNow;
             hudTimeCounterStallLogged = false;
+            if (pauseMenuStateActive)
+                SetPauseMenuStateActive(false, "hud_timer_resumed");
             Log("CHALLENGE_HUD_TIMER_240 t=" + elapsed.ToString("0.000") +
                 " u32=" + previous + "->" + value +
                 " i32=" + ((int)previous).ToString() + "->" + ((int)value).ToString() +
@@ -2158,9 +2333,11 @@ namespace TSRTimer
 
             if (stopFlip)
             {
+                challengeSplitIgnoresPause = ChallengeHudTimerMovedWithin(1.15);
                 Log("CHALLENGE_SPLIT GAMESTATE_STOP t=" + elapsed.ToString("0.000") +
                     " 0x300=" + lastGameState300Value + "->" + value300 +
                     " 0x318=" + lastGameState318Value + "->" + value318 +
+                    " ignore_pause=" + (challengeSplitIgnoresPause ? "1" : "0") +
                     " world=" + worldName);
                 challengeProbeActive = false;
                 return true;
