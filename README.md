@@ -20,9 +20,7 @@ The bridge detects story difficulty from the live `TS_GameInstance_C` object:
 - `TS_GameInstance_C + 0x38A = 1` = Normal
 - `TS_GameInstance_C + 0x38A = 2` = Hard
 
-The full address changes every game boot, so TSR-Timer finds `TS_GameInstance_C` first and then reads that offset inside it.
-
-TSR-Timer does not read the game's save file.
+TSR-Timer finds `TS_GameInstance_C` first and then reads that offset inside it.
 
 Autosplit Signals
 -----------------
