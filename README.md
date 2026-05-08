@@ -11,8 +11,9 @@ Modes
 - Single story level run: one timer for the current story level.
 - Full TS story run: 9 split rows for a full story route.
 - Challenge run: one timer for challenge runs.
-- Full challenge run: 32 split rows for a full challenge route.
 - Best times: shows saved story best times.
+
+Full challenge run is temporarily unavailable while the route logic is being refined.
 
 The bridge detects story difficulty from the live `TS_GameInstance_C` object:
 
@@ -69,7 +70,7 @@ Full story saves only the completed 9-level total. The total is saved under the 
 
 Challenge run does not save best times.
 
-Full challenge run saves only the completed 32-challenge total under `Full challenge run | Total`.
+Full challenge best times are temporarily hidden while Full challenge run is unavailable.
 
 Route Logic
 -----------
@@ -81,7 +82,7 @@ Full story:
 - Loading/unload signals can reset row 1, but they do not stop a running timer on row 2 onward.
 - A menu cancel signal also blocks any start signal that arrives in the same poll, so the timer cannot start in the main menu.
 
-Full challenge:
+Full challenge is temporarily unavailable in the app. The intended route behavior is:
 
 - A finished challenge is shown immediately and included in the displayed total.
 - The next row is not committed until the challenge/menu screen appears.

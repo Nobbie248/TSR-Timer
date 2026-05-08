@@ -102,13 +102,12 @@ static const char* kChallengeRouteNames[32] = {
     "Cortez Can't Jump!",
     "TSUG"
 };
-static const int kModeCount = 5;
+static const int kModeCount = 4;
 static const bool kBestTimesEnabled = true;
-static const char* kModeNames[5] = {
+static const char* kModeNames[4] = {
     "Single story level run",
     "Full TS story run",
     "Challenge run",
-    "Full challenge run",
     "Best times"
 };
 
@@ -882,15 +881,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             {
                 if (PointInRect(gModeButtonRects[i], x, y))
                 {
-                    if (i >= 0 && i <= 3)
+                    if (i >= 0 && i <= 2)
                     {
                         if (i == 1)
                             gAppScreen = AppScreen::FullStoryTimer;
-                        else if (i == 3)
-                            gAppScreen = AppScreen::FullChallengeTimer;
                         else
                             gAppScreen = AppScreen::SingleLevelTimer;
-                        gChallengeModeActive = (i == 2 || i == 3);
+                        gChallengeModeActive = (i == 2);
                         gChallengeEnteredAt = gChallengeModeActive ? GetTimeSeconds() : -1.0;
                         gScreenChanged = true;
                         gFinishedRunTimes.clear();
@@ -1494,9 +1491,6 @@ static void DrawBestTimes(HWND hwnd)
             DrawBestRow(singleMode, routeName, routeName);
         DrawBestRow(fullMode, "Total", "Full Story Run");
     }
-    DrawHeader("Challenge");
-    DrawBestRow("Full challenge run", "Total", "Full Challenge Run");
-
     SelectObject(memDC, buttonFont);
     auto DrawButton = [&](RECT& r, const char* text, COLORREF fill, COLORREF edge) {
         HBRUSH brush = CreateSolidBrush(fill);
