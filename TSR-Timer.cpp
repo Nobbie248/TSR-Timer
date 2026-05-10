@@ -123,6 +123,7 @@ enum class AppScreen
     ModeSelector,
     SingleLevelTimer,
     FullStoryTimer,
+    ChallengeTimer,
     FullChallengeTimer,
     BestTimes,
     BestStorySplits
@@ -165,7 +166,7 @@ static int CurrentScreenWidth()
 
 static int CurrentScreenHeight()
 {
-    if (gAppScreen == AppScreen::SingleLevelTimer)
+    if (gAppScreen == AppScreen::SingleLevelTimer || gAppScreen == AppScreen::ChallengeTimer)
         return ScaleUi(100);
     if (gAppScreen == AppScreen::ModeSelector)
         return ScaleUi(kModeSelectorH);
@@ -970,6 +971,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                     {
                         if (i == 1)
                             gAppScreen = AppScreen::FullStoryTimer;
+                        else if (i == 2)
+                            gAppScreen = AppScreen::ChallengeTimer;
                         else
                             gAppScreen = AppScreen::SingleLevelTimer;
                         gChallengeModeActive = (i == 2);
@@ -2257,7 +2260,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
         else
             gRunTimerSeconds = timerElapsed;
 
-        if (gAppScreen == AppScreen::SingleLevelTimer)
+        if (gAppScreen == AppScreen::SingleLevelTimer || gAppScreen == AppScreen::ChallengeTimer)
             DrawSingleTimer(hwnd);
         else
             DrawOverlay(hwnd);
