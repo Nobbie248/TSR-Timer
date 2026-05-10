@@ -30,8 +30,14 @@ enum AutoSplitFlags
 static LARGE_INTEGER gFreq;
 static double gRunTimerSeconds = 0.0;
 static std::vector<double> gFinishedRunTimes;
+static std::vector<double> gFinishedRunBestDiffs;
+static std::vector<bool> gFinishedRunBestDiffKnown;
 static std::string gCurrentGameName;
 static bool gRunTimerLineActive = false;
+static bool gSingleTimerBestDiffKnown = false;
+static double gSingleTimerBestDiff = 0.0;
+static bool gFullStoryBestDiffKnown = false;
+static double gFullStoryBestDiff = 0.0;
 static bool gResetTimerRequested = false;
 static bool gForceClearResetRequested = false;
 static bool gFullStoryMenuAfterFinish = false;
@@ -49,6 +55,7 @@ static RECT gCloseButtonRect = { 0, 0, 0, 0 };
 static RECT gBackButtonRect = { 0, 0, 0, 0 };
 static RECT gModeButtonRects[5] = {};
 static RECT gModeCloseButtonRect = { 0, 0, 0, 0 };
+static RECT gBestSplitButtonRects[3] = {};
 
 static const int kOverlayTimerOnlyW = 236;
 static const int kOverlayTimerOnlyH = 302;
@@ -117,7 +124,8 @@ enum class AppScreen
     SingleLevelTimer,
     FullStoryTimer,
     FullChallengeTimer,
-    BestTimes
+    BestTimes,
+    BestStorySplits
 };
 
 static AppScreen gAppScreen = AppScreen::ModeSelector;
@@ -126,6 +134,7 @@ static char gModeStatusText[96] = "";
 static bool gChallengeModeActive = false;
 static double gChallengeEnteredAt = -1.0;
 static int gStoryDifficultyIndex = -1;
+static int gBestSplitsDifficultyIndex = 0;
 static char gExeDir[MAX_PATH] = {};
 
 struct BestTimeRecord
@@ -162,7 +171,7 @@ static int CurrentScreenHeight()
         return ScaleUi(kModeSelectorH);
     if (gAppScreen == AppScreen::FullChallengeTimer)
         return ScaleUi(kFullChallengeTimerH);
-    if (gAppScreen == AppScreen::BestTimes)
+    if (gAppScreen == AppScreen::BestTimes || gAppScreen == AppScreen::BestStorySplits)
         return ScaleUi(kBestTimesH);
 
     return ScaleUi(kOverlayTimerOnlyH);
@@ -524,6 +533,15 @@ static std::string StoryModeNameForDifficulty(const char* baseMode, int difficul
     return std::string(baseMode) + " " + StoryDifficultyNameForIndex(difficultyIndex);
 }
 
+static std::string FullStorySplitName(int index)
+{
+    if (index < 0 || index >= 9)
+        return "";
+    char name[64];
+    std::snprintf(name, sizeof(name), "Split %d %s", index + 1, kRouteNames[index]);
+    return name;
+}
+
 static std::string StoryModeName(const char* baseMode)
 {
     return StoryModeNameForDifficulty(baseMode, gStoryDifficultyIndex);
@@ -566,9 +584,9 @@ static void LoadBestTimes()
 
         if (mode == "Challenge timer" || mode == "Challenge run")
             continue;
-        if (mode == "Full TS story run" && name != "Total")
+        if (mode == "Full TS story run" && name != "Total" && name.rfind("Split ", 0) != 0)
             continue;
-        if (mode.rfind("Full TS story run ", 0) == 0 && name != "Total")
+        if (mode.rfind("Full TS story run ", 0) == 0 && name != "Total" && name.rfind("Split ", 0) != 0)
             continue;
         if (mode == "Full challenge run" && name != "Total")
             continue;
@@ -602,6 +620,13 @@ static double QuantizeRunTimer(double seconds)
     return (double)((int)(seconds * 100.0)) / 100.0;
 }
 
+static double QuantizeDelta(double seconds)
+{
+    if (seconds < 0.0)
+        return -((double)((int)((-seconds) * 100.0 + 0.0001)) / 100.0);
+    return (double)((int)(seconds * 100.0 + 0.0001)) / 100.0;
+}
+
 static void RecordBestTime(const std::string& mode, const std::string& name, double seconds)
 {
     if (!kBestTimesEnabled)
@@ -612,9 +637,9 @@ static void RecordBestTime(const std::string& mode, const std::string& name, dou
     seconds = QuantizeRunTimer(seconds);
     if (mode == "Challenge timer" || mode == "Challenge run")
         return;
-    if (mode == "Full TS story run" && name != "Total")
+    if (mode == "Full TS story run" && name != "Total" && name.rfind("Split ", 0) != 0)
         return;
-    if (mode.rfind("Full TS story run ", 0) == 0 && name != "Total")
+    if (mode.rfind("Full TS story run ", 0) == 0 && name != "Total" && name.rfind("Split ", 0) != 0)
         return;
     if (mode == "Full challenge run" && name != "Total")
         return;
@@ -630,6 +655,35 @@ static void RecordBestTime(const std::string& mode, const std::string& name, dou
                 record.seconds = seconds;
                 SaveBestTimes();
             }
+            return;
+        }
+    }
+
+    BestTimeRecord record;
+    record.mode = mode;
+    record.name = name;
+    record.seconds = seconds;
+    gBestTimes.push_back(record);
+    SaveBestTimes();
+}
+
+static void SetBestTime(const std::string& mode, const std::string& name, double seconds)
+{
+    if (!kBestTimesEnabled)
+        return;
+
+    if (mode.empty() || name.empty() || seconds <= 0.0)
+        return;
+    seconds = QuantizeRunTimer(seconds);
+    if (name == "Unknown" || name == "Unknown Challenge")
+        return;
+
+    for (BestTimeRecord& record : gBestTimes)
+    {
+        if (record.mode == mode && record.name == name)
+        {
+            record.seconds = seconds;
+            SaveBestTimes();
             return;
         }
     }
@@ -659,8 +713,16 @@ static void CommitFullChallengePendingSplit()
         return;
 
     gFinishedRunTimes.push_back(gFullChallengePendingSeconds);
+    gFinishedRunBestDiffs.push_back(0.0);
+    gFinishedRunBestDiffKnown.push_back(false);
     if (gFinishedRunTimes.size() > 32)
+    {
         gFinishedRunTimes.erase(gFinishedRunTimes.begin());
+        if (!gFinishedRunBestDiffs.empty())
+            gFinishedRunBestDiffs.erase(gFinishedRunBestDiffs.begin());
+        if (!gFinishedRunBestDiffKnown.empty())
+            gFinishedRunBestDiffKnown.erase(gFinishedRunBestDiffKnown.begin());
+    }
 
     gFullChallengePendingSplit = false;
     gFullChallengePendingSeconds = 0.0;
@@ -700,6 +762,29 @@ static void FormatRunTimer(double seconds, char* out, size_t outSize)
         std::snprintf(out, outSize, "%d:%02d:%02d.%02d", hours, mins, secs, centis);
     else
         std::snprintf(out, outSize, "%d:%02d.%02d", mins, secs, centis);
+}
+
+static void FormatRunDelta(double seconds, char* out, size_t outSize)
+{
+    if (!out || outSize == 0)
+        return;
+
+    seconds = QuantizeDelta(seconds);
+    double absSeconds = seconds < 0.0 ? -seconds : seconds;
+    int totalCentis = (int)(absSeconds * 100.0);
+    int centis = totalCentis % 100;
+    int totalSeconds = totalCentis / 100;
+    int secs = totalSeconds % 60;
+    int mins = (totalSeconds / 60) % 60;
+    int hours = totalSeconds / 3600;
+    char sign = seconds < 0.0 ? '-' : '+';
+
+    if (hours > 0)
+        std::snprintf(out, outSize, "%c%d:%02d:%02d.%02d", sign, hours, mins, secs, centis);
+    else if (mins > 0)
+        std::snprintf(out, outSize, "%c%d:%02d.%02d", sign, mins, secs, centis);
+    else
+        std::snprintf(out, outSize, "%c%d.%02d", sign, secs, centis);
 }
 
 struct AutoSplitBridge
@@ -891,8 +976,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                         gChallengeEnteredAt = gChallengeModeActive ? GetTimeSeconds() : -1.0;
                         gScreenChanged = true;
                         gFinishedRunTimes.clear();
+                        gFinishedRunBestDiffs.clear();
+                        gFinishedRunBestDiffKnown.clear();
                         gRunTimerSeconds = 0.0;
                         gRunTimerLineActive = false;
+                        gSingleTimerBestDiffKnown = false;
+                        gSingleTimerBestDiff = 0.0;
+                        gFullStoryBestDiffKnown = false;
+                        gFullStoryBestDiff = 0.0;
                         gFullStoryMenuAfterFinish = false;
                         gFullChallengePendingSplit = false;
                         gFullChallengePendingSeconds = 0.0;
@@ -919,11 +1010,32 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             return 0;
         }
 
+        if (gAppScreen == AppScreen::BestTimes)
+        {
+            for (int i = 0; i < 3; ++i)
+            {
+                if (PointInRect(gBestSplitButtonRects[i], x, y))
+                {
+                    gBestSplitsDifficultyIndex = i;
+                    gAppScreen = AppScreen::BestStorySplits;
+                    gScreenChanged = true;
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                    return 0;
+                }
+            }
+        }
+
         if (PointInRect(gResetButtonRect, x, y))
         {
             gFinishedRunTimes.clear();
+            gFinishedRunBestDiffs.clear();
+            gFinishedRunBestDiffKnown.clear();
             gRunTimerSeconds = 0.0;
             gRunTimerLineActive = false;
+            gSingleTimerBestDiffKnown = false;
+            gSingleTimerBestDiff = 0.0;
+            gFullStoryBestDiffKnown = false;
+            gFullStoryBestDiff = 0.0;
             gFullStoryMenuAfterFinish = false;
             gFullChallengePendingSplit = false;
             gFullChallengePendingSeconds = 0.0;
@@ -937,13 +1049,28 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
         if (PointInRect(gBackButtonRect, x, y))
         {
+            if (gAppScreen == AppScreen::BestStorySplits)
+            {
+                gAppScreen = AppScreen::BestTimes;
+                gScreenChanged = true;
+                LoadBestTimes();
+                InvalidateRect(hwnd, nullptr, FALSE);
+                return 0;
+            }
+
             gAppScreen = AppScreen::ModeSelector;
             gScreenChanged = true;
             gChallengeModeActive = false;
             gChallengeEnteredAt = -1.0;
             gFinishedRunTimes.clear();
+            gFinishedRunBestDiffs.clear();
+            gFinishedRunBestDiffKnown.clear();
             gRunTimerSeconds = 0.0;
             gRunTimerLineActive = false;
+            gSingleTimerBestDiffKnown = false;
+            gSingleTimerBestDiff = 0.0;
+            gFullStoryBestDiffKnown = false;
+            gFullStoryBestDiff = 0.0;
             gFullStoryMenuAfterFinish = false;
             gFullChallengePendingSplit = false;
             gFullChallengePendingSeconds = 0.0;
@@ -1158,6 +1285,16 @@ static void DrawOverlay(HWND hwnd)
         DEFAULT_PITCH | FF_SWISS,
         "Arial"
     );
+    HFONT captionFont = CreateFontA(
+        ScaleUi(11), 0, 0, 0, FW_BOLD,
+        FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS,
+        ANTIALIASED_QUALITY,
+        DEFAULT_PITCH | FF_SWISS,
+        "Arial"
+    );
     HGDIOBJ oldFont = SelectObject(memDC, font);
 
     const int padL = ScaleUi(12);
@@ -1173,6 +1310,7 @@ static void DrawOverlay(HWND hwnd)
     content.bottom -= padB;
 
     char timerText[32];
+    char deltaText[32];
     char line[64];
 
     auto DrawTimerLine = [&](int rowNumber, double seconds, int rowY, COLORREF timeColor) {
@@ -1180,18 +1318,35 @@ static void DrawOverlay(HWND hwnd)
         std::snprintf(line, sizeof(line), "%d  %s", rowNumber, timerText);
 
         RECT rTime = content;
-        rTime.right = content.left + ScaleUi(gAppScreen == AppScreen::FullChallengeTimer ? 70 : 88);
+        rTime.right = content.left + ScaleUi(gAppScreen == AppScreen::FullStoryTimer ? 74 :
+            (gAppScreen == AppScreen::FullChallengeTimer ? 70 : 88));
         rTime.top = rowY;
         SetTextColor(memDC, timeColor);
         DrawTextA(memDC, line, -1, &rTime, DT_LEFT | DT_TOP | DT_SINGLELINE);
 
         if (gAppScreen == AppScreen::FullStoryTimer && rowNumber >= 1 && rowNumber <= 9)
         {
+            int rowIndex = rowNumber - 1;
             RECT rName = content;
             rName.left = rTime.right + ScaleUi(2);
+            if (rowIndex >= 0 &&
+                rowIndex < (int)gFinishedRunBestDiffKnown.size() &&
+                gFinishedRunBestDiffKnown[rowIndex] &&
+                rowIndex < (int)gFinishedRunBestDiffs.size())
+            {
+                FormatRunDelta(gFinishedRunBestDiffs[rowIndex], deltaText, sizeof(deltaText));
+                RECT rDelta = content;
+                rDelta.left = rTime.right + ScaleUi(2);
+                rDelta.right = rDelta.left + ScaleUi(48);
+                rDelta.top = rowY;
+                SetTextColor(memDC, gFinishedRunBestDiffs[rowIndex] > 0.0 ? RGB(220, 110, 110) : RGB(110, 220, 140));
+                DrawTextA(memDC, deltaText, -1, &rDelta, DT_LEFT | DT_TOP | DT_SINGLELINE);
+                rName.left = rDelta.right + ScaleUi(2);
+            }
+
             rName.top = rowY;
             SetTextColor(memDC, RGB(220, 220, 220));
-            DrawTextA(memDC, kRouteNames[rowNumber - 1], -1, &rName, DT_RIGHT | DT_TOP | DT_SINGLELINE);
+            DrawTextA(memDC, kRouteNames[rowNumber - 1], -1, &rName, DT_RIGHT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS);
         }
         else if (gAppScreen == AppScreen::FullChallengeTimer && rowNumber >= 1 && rowNumber <= 32)
         {
@@ -1259,6 +1414,37 @@ static void DrawOverlay(HWND hwnd)
     SetTextColor(memDC, RGB(220, 220, 220));
     DrawTextA(memDC, line, -1, &rTotal, DT_LEFT | DT_TOP | DT_SINGLELINE);
 
+    if (gAppScreen == AppScreen::FullStoryTimer)
+    {
+        double cumulativeDiff = 0.0;
+        bool cumulativeDiffKnown = false;
+        size_t diffCount = gFinishedRunBestDiffKnown.size();
+        if (gFinishedRunBestDiffs.size() < diffCount)
+            diffCount = gFinishedRunBestDiffs.size();
+        if (gFinishedRunTimes.size() < diffCount)
+            diffCount = gFinishedRunTimes.size();
+
+        for (size_t i = 0; i < diffCount; ++i)
+        {
+            if (!gFinishedRunBestDiffKnown[i])
+                continue;
+            cumulativeDiff += QuantizeDelta(gFinishedRunBestDiffs[i]);
+            cumulativeDiffKnown = true;
+        }
+
+        if (cumulativeDiffKnown)
+        {
+            cumulativeDiff = QuantizeDelta(cumulativeDiff);
+            FormatRunDelta(cumulativeDiff, deltaText, sizeof(deltaText));
+            RECT rTotalDelta = content;
+            rTotalDelta.left += ScaleUi(98);
+            rTotalDelta.right = rTotalDelta.left + ScaleUi(58);
+            rTotalDelta.top = rTotal.top;
+            SetTextColor(memDC, cumulativeDiff > 0.0 ? RGB(220, 110, 110) : RGB(110, 220, 140));
+            DrawTextA(memDC, deltaText, -1, &rTotalDelta, DT_LEFT | DT_TOP | DT_SINGLELINE);
+        }
+    }
+
     SelectObject(memDC, buttonFont);
     auto DrawButton = [&](RECT& r, const char* text, COLORREF fill, COLORREF edge) {
         HBRUSH brush = CreateSolidBrush(fill);
@@ -1292,6 +1478,7 @@ static void DrawOverlay(HWND hwnd)
     SelectObject(memDC, oldFont);
     DeleteObject(font);
     DeleteObject(buttonFont);
+    DeleteObject(captionFont);
     ReleaseDC(hwnd, hdc);
 }
 
@@ -1361,6 +1548,16 @@ static void DrawSingleTimer(HWND hwnd)
     timerRect.top += ScaleUi(45);
     SetTextColor(memDC, gRunTimerLineActive ? RGB(220, 110, 110) : RGB(220, 220, 220));
     DrawTextA(memDC, timerText, -1, &timerRect, DT_CENTER | DT_TOP | DT_SINGLELINE);
+
+    if (gSingleTimerBestDiffKnown)
+    {
+        char deltaText[32];
+        FormatRunDelta(gSingleTimerBestDiff, deltaText, sizeof(deltaText));
+        RECT deltaRect = rect;
+        deltaRect.top += ScaleUi(70);
+        SetTextColor(memDC, gSingleTimerBestDiff > 0.0 ? RGB(220, 110, 110) : RGB(110, 220, 140));
+        DrawTextA(memDC, deltaText, -1, &deltaRect, DT_CENTER | DT_TOP | DT_SINGLELINE);
+    }
 
     SelectObject(memDC, buttonFont);
     auto DrawButton = [&](RECT& r, const char* text, COLORREF fill, COLORREF edge) {
@@ -1456,6 +1653,8 @@ static void DrawBestTimes(HWND hwnd)
     int lineStep = ScaleUi(20);
     char timeText[32];
     char line[192];
+    for (RECT& r : gBestSplitButtonRects)
+        r = { 0, 0, 0, 0 };
 
     auto DrawHeader = [&](const char* text) {
         RECT row = rect;
@@ -1481,15 +1680,52 @@ static void DrawBestTimes(HWND hwnd)
         y += lineStep;
     };
 
+    auto DrawFullStoryRow = [&](const std::string& mode, int difficultyIndex) {
+        double seconds = FindBestTimeSeconds(mode, "Total");
+        FormatRunTimer(seconds, timeText, sizeof(timeText));
+        std::snprintf(line, sizeof(line), "%s  Full Story Run", timeText);
+
+        RECT row = rect;
+        row.left += ScaleUi(12);
+        row.right -= ScaleUi(42);
+        row.top = y;
+        SetTextColor(memDC, seconds > 0.0 ? RGB(220, 220, 220) : RGB(150, 150, 150));
+        DrawTextA(memDC, line, -1, &row, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+        if (difficultyIndex >= 0 && difficultyIndex < 3 && seconds > 0.0)
+        {
+            gBestSplitButtonRects[difficultyIndex] = {
+                rect.right - ScaleUi(34),
+                y - ScaleUi(1),
+                rect.right - ScaleUi(12),
+                y + ScaleUi(18)
+            };
+            RECT button = gBestSplitButtonRects[difficultyIndex];
+            HBRUSH brush = CreateSolidBrush(RGB(35, 35, 43));
+            HPEN pen = CreatePen(PS_SOLID, 1, RGB(120, 120, 130));
+            HGDIOBJ oldBrush = SelectObject(memDC, brush);
+            HGDIOBJ oldPen = SelectObject(memDC, pen);
+            RoundRect(memDC, button.left, button.top, button.right, button.bottom, ScaleUi(5), ScaleUi(5));
+            SelectObject(memDC, oldBrush);
+            SelectObject(memDC, oldPen);
+            DeleteObject(brush);
+            DeleteObject(pen);
+            SetTextColor(memDC, RGB(220, 220, 220));
+            DrawTextA(memDC, ">", -1, &button, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
+        y += lineStep;
+    };
+
     const char* difficulties[] = { "Easy", "Normal", "Hard" };
-    for (const char* difficulty : difficulties)
+    for (int difficultyIndex = 0; difficultyIndex < 3; ++difficultyIndex)
     {
+        const char* difficulty = difficulties[difficultyIndex];
         DrawHeader(difficulty);
         std::string singleMode = std::string("Single story level run ") + difficulty;
         std::string fullMode = std::string("Full TS story run ") + difficulty;
         for (const char* routeName : kRouteNames)
             DrawBestRow(singleMode, routeName, routeName);
-        DrawBestRow(fullMode, "Total", "Full Story Run");
+        DrawFullStoryRow(fullMode, difficultyIndex);
     }
     SelectObject(memDC, buttonFont);
     auto DrawButton = [&](RECT& r, const char* text, COLORREF fill, COLORREF edge) {
@@ -1503,6 +1739,123 @@ static void DrawBestTimes(HWND hwnd)
         DeleteObject(brush);
         DeleteObject(pen);
 
+        SetTextColor(memDC, fill == RGB(70, 50, 55) ? RGB(255, 235, 235) : RGB(220, 220, 220));
+        DrawTextA(memDC, text, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    };
+
+    int buttonTop = ScaleUi(8);
+    gScaleDownButtonRect = { ScaleUi(12), buttonTop, ScaleUi(32), buttonTop + ScaleUi(20) };
+    gScaleUpButtonRect = { gScaleDownButtonRect.right + ScaleUi(4), buttonTop, gScaleDownButtonRect.right + ScaleUi(24), buttonTop + ScaleUi(20) };
+    gBackButtonRect = { gScaleUpButtonRect.right + ScaleUi(4), buttonTop, gScaleUpButtonRect.right + ScaleUi(48), buttonTop + ScaleUi(20) };
+    gResetButtonRect = { 0, 0, 0, 0 };
+    gCloseButtonRect = { w - ScaleUi(32), buttonTop, w - ScaleUi(12), buttonTop + ScaleUi(20) };
+
+    DrawButton(gScaleDownButtonRect, "-", RGB(35, 35, 43), RGB(120, 120, 130));
+    DrawButton(gScaleUpButtonRect, "+", RGB(35, 35, 43), RGB(120, 120, 130));
+    DrawButton(gBackButtonRect, "Back", RGB(35, 35, 43), RGB(120, 120, 130));
+    DrawButton(gCloseButtonRect, "X", RGB(70, 50, 55), RGB(220, 110, 110));
+
+    BitBlt(hdc, 0, 0, w, h, memDC, 0, 0, SRCCOPY);
+    SelectObject(memDC, oldFont);
+    DeleteObject(titleFont);
+    DeleteObject(itemFont);
+    DeleteObject(buttonFont);
+    ReleaseDC(hwnd, hdc);
+}
+
+static void DrawBestStorySplits(HWND hwnd)
+{
+    RECT rect;
+    GetClientRect(hwnd, &rect);
+    int w = rect.right - rect.left;
+    int h = rect.bottom - rect.top;
+    if (w <= 0 || h <= 0) return;
+
+    HDC hdc = GetDC(hwnd);
+
+    static HDC memDC = nullptr;
+    static HBITMAP memBmp = nullptr;
+    static HBITMAP oldBmp = nullptr;
+    static int bufW = 0;
+    static int bufH = 0;
+
+    if (!memDC) memDC = CreateCompatibleDC(hdc);
+    if (!memBmp || bufW != w || bufH != h)
+    {
+        if (memBmp)
+        {
+            SelectObject(memDC, oldBmp);
+            DeleteObject(memBmp);
+        }
+        memBmp = CreateCompatibleBitmap(hdc, w, h);
+        oldBmp = (HBITMAP)SelectObject(memDC, memBmp);
+        bufW = w;
+        bufH = h;
+    }
+
+    HBRUSH bg = CreateSolidBrush(RGB(0, 0, 0));
+    FillRect(memDC, &rect, bg);
+    DeleteObject(bg);
+    SetBkMode(memDC, TRANSPARENT);
+
+    HFONT titleFont = CreateFontA(ScaleUi(18), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
+        DEFAULT_PITCH | FF_SWISS, "Arial");
+    HFONT itemFont = CreateFontA(ScaleUi(18), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
+        DEFAULT_PITCH | FF_SWISS, "Arial");
+    HFONT buttonFont = CreateFontA(ScaleUi(17), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
+        DEFAULT_PITCH | FF_SWISS, "Arial");
+    HGDIOBJ oldFont = SelectObject(memDC, titleFont);
+
+    RECT title = rect;
+    title.top += ScaleUi(31);
+    SetTextColor(memDC, RGB(220, 220, 220));
+    std::string titleText = std::string("Full Story PB Splits - ") + StoryDifficultyNameForIndex(gBestSplitsDifficultyIndex);
+    DrawTextA(memDC, titleText.c_str(), -1, &title, DT_CENTER | DT_TOP | DT_SINGLELINE);
+
+    SelectObject(memDC, itemFont);
+    int y = ScaleUi(56);
+    int lineStep = ScaleUi(24);
+    char timeText[32];
+    char line[192];
+    std::string fullMode = StoryModeNameForDifficulty("Full TS story run", gBestSplitsDifficultyIndex);
+    for (int i = 0; i < 9; ++i)
+    {
+        double seconds = FindBestTimeSeconds(fullMode, FullStorySplitName(i));
+        FormatRunTimer(seconds, timeText, sizeof(timeText));
+        std::snprintf(line, sizeof(line), "%d  %s  %s", i + 1, timeText, kRouteNames[i]);
+        RECT row = rect;
+        row.left += ScaleUi(12);
+        row.right -= ScaleUi(12);
+        row.top = y;
+        SetTextColor(memDC, seconds > 0.0 ? RGB(220, 220, 220) : RGB(150, 150, 150));
+        DrawTextA(memDC, line, -1, &row, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS);
+        y += lineStep;
+    }
+
+    double total = FindBestTimeSeconds(fullMode, "Total");
+    FormatRunTimer(total, timeText, sizeof(timeText));
+    std::snprintf(line, sizeof(line), "Total %s", timeText);
+    RECT totalRow = rect;
+    totalRow.left += ScaleUi(12);
+    totalRow.right -= ScaleUi(12);
+    totalRow.top = y + ScaleUi(8);
+    SetTextColor(memDC, RGB(220, 220, 220));
+    DrawTextA(memDC, line, -1, &totalRow, DT_LEFT | DT_TOP | DT_SINGLELINE);
+
+    SelectObject(memDC, buttonFont);
+    auto DrawButton = [&](RECT& r, const char* text, COLORREF fill, COLORREF edge) {
+        HBRUSH brush = CreateSolidBrush(fill);
+        HPEN pen = CreatePen(PS_SOLID, 1, edge);
+        HGDIOBJ oldBrush = SelectObject(memDC, brush);
+        HGDIOBJ oldPen = SelectObject(memDC, pen);
+        RoundRect(memDC, r.left, r.top, r.right, r.bottom, ScaleUi(6), ScaleUi(6));
+        SelectObject(memDC, oldBrush);
+        SelectObject(memDC, oldPen);
+        DeleteObject(brush);
+        DeleteObject(pen);
         SetTextColor(memDC, fill == RGB(70, 50, 55) ? RGB(255, 235, 235) : RGB(220, 220, 220));
         DrawTextA(memDC, text, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     };
@@ -1637,10 +1990,16 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
             pendingAutoFlags.exchange(0);
             autoFlags = 0;
             gFinishedRunTimes.clear();
+            gFinishedRunBestDiffs.clear();
+            gFinishedRunBestDiffKnown.clear();
             timerRunning = false;
             timerElapsed = 0.0;
             gRunTimerSeconds = 0.0;
             gRunTimerLineActive = false;
+            gSingleTimerBestDiffKnown = false;
+            gSingleTimerBestDiff = 0.0;
+            gFullStoryBestDiffKnown = false;
+            gFullStoryBestDiff = 0.0;
             gFullStoryMenuAfterFinish = false;
             gFullChallengePendingSplit = false;
             gFullChallengePendingSeconds = 0.0;
@@ -1674,6 +2033,12 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
             Sleep(10);
             continue;
         }
+        if (gAppScreen == AppScreen::BestStorySplits)
+        {
+            DrawBestStorySplits(hwnd);
+            Sleep(10);
+            continue;
+        }
 
         if ((autoFlags & AUTO_START_CANCELED) && !gChallengeModeActive)
         {
@@ -1697,6 +2062,10 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
                 timerElapsed = 0.0;
                 gRunTimerSeconds = 0.0;
                 gRunTimerLineActive = false;
+                gSingleTimerBestDiffKnown = false;
+                gSingleTimerBestDiff = 0.0;
+                gFullStoryBestDiffKnown = false;
+                gFullStoryBestDiff = 0.0;
             }
         }
         else if ((autoFlags & AUTO_START_CANCELED) && gAppScreen == AppScreen::FullChallengeTimer)
@@ -1723,7 +2092,11 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
             if (!timerRunning || allowRunningLoadingReset)
             {
                 if (gAppScreen != AppScreen::FullChallengeTimer)
+                {
                     gFinishedRunTimes.clear();
+                    gFinishedRunBestDiffs.clear();
+                    gFinishedRunBestDiffKnown.clear();
+                }
                 timerRunning = false;
                 timerElapsed = 0.0;
                 if (!gFullChallengePendingSplit)
@@ -1778,6 +2151,16 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
             timerElapsed = 0.0;
             gRunTimerSeconds = 0.0;
             gRunTimerLineActive = true;
+            if (gAppScreen == AppScreen::SingleLevelTimer)
+            {
+                gSingleTimerBestDiffKnown = false;
+                gSingleTimerBestDiff = 0.0;
+            }
+            if (gAppScreen == AppScreen::FullStoryTimer && gFinishedRunTimes.empty())
+            {
+                gFullStoryBestDiffKnown = false;
+                gFullStoryBestDiff = 0.0;
+            }
         }
 
         if ((autoFlags & splitFlag) && timerRunning)
@@ -1790,16 +2173,34 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
             gRunTimerSeconds = timerElapsed;
             UpdateCurrentGameName(gChallengeModeActive);
             int splitDifficultyIndex = gStoryDifficultyIndex;
+            bool splitBestDiffKnown = false;
+            double splitBestDiff = 0.0;
             if (gAppScreen == AppScreen::FullStoryTimer)
             {
                 gFullStoryMenuAfterFinish = false;
                 std::string name = gCurrentGameName.empty() ? "Unknown" : gCurrentGameName;
-                RecordBestTime(StoryModeNameForDifficulty("Single story level run", splitDifficultyIndex), name, timerElapsed);
+                std::string singleMode = StoryModeNameForDifficulty("Single story level run", splitDifficultyIndex);
+                int splitIndex = (int)gFinishedRunTimes.size();
+                std::string fullStoryMode = StoryModeNameForDifficulty("Full TS story run", splitDifficultyIndex);
+                double previousBest = FindBestTimeSeconds(fullStoryMode, FullStorySplitName(splitIndex));
+                if (previousBest > 0.0)
+                {
+                    splitBestDiffKnown = true;
+                    splitBestDiff = QuantizeRunTimer(timerElapsed) - QuantizeRunTimer(previousBest);
+                }
+                RecordBestTime(singleMode, name, timerElapsed);
             }
             else if (gAppScreen == AppScreen::SingleLevelTimer)
             {
                 std::string name = gCurrentGameName.empty() ? "Unknown" : gCurrentGameName;
-                RecordBestTime(StoryModeNameForDifficulty("Single story level run", splitDifficultyIndex), name, timerElapsed);
+                std::string singleMode = StoryModeNameForDifficulty("Single story level run", splitDifficultyIndex);
+                double previousBest = FindBestTimeSeconds(singleMode, name);
+                gSingleTimerBestDiffKnown = previousBest > 0.0;
+                if (gSingleTimerBestDiffKnown)
+                    gSingleTimerBestDiff = QuantizeRunTimer(timerElapsed) - QuantizeRunTimer(previousBest);
+                else
+                    gSingleTimerBestDiff = 0.0;
+                RecordBestTime(singleMode, name, timerElapsed);
             }
 
             if (gAppScreen == AppScreen::FullChallengeTimer)
@@ -1814,9 +2215,17 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
             else
             {
                 gFinishedRunTimes.push_back(timerElapsed);
+                gFinishedRunBestDiffs.push_back(splitBestDiff);
+                gFinishedRunBestDiffKnown.push_back(gAppScreen == AppScreen::FullStoryTimer && splitBestDiffKnown);
                 size_t maxStoredRows = 9;
                 if (gFinishedRunTimes.size() > maxStoredRows)
+                {
                     gFinishedRunTimes.erase(gFinishedRunTimes.begin());
+                    if (!gFinishedRunBestDiffs.empty())
+                        gFinishedRunBestDiffs.erase(gFinishedRunBestDiffs.begin());
+                    if (!gFinishedRunBestDiffKnown.empty())
+                        gFinishedRunBestDiffKnown.erase(gFinishedRunBestDiffKnown.begin());
+                }
             }
 
             if (gAppScreen == AppScreen::FullStoryTimer && gFinishedRunTimes.size() == 9)
@@ -1824,7 +2233,19 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int)
                 double total = 0.0;
                 for (double splitSeconds : gFinishedRunTimes)
                     total += splitSeconds;
-                RecordBestTime(StoryModeNameForDifficulty("Full TS story run", splitDifficultyIndex), "Total", total);
+                std::string fullStoryMode = StoryModeNameForDifficulty("Full TS story run", splitDifficultyIndex);
+                double previousTotalBest = FindBestTimeSeconds(fullStoryMode, "Total");
+                gFullStoryBestDiffKnown = previousTotalBest > 0.0;
+                if (gFullStoryBestDiffKnown)
+                    gFullStoryBestDiff = QuantizeRunTimer(total) - QuantizeRunTimer(previousTotalBest);
+                else
+                    gFullStoryBestDiff = 0.0;
+                if (previousTotalBest <= 0.0 || QuantizeRunTimer(total) <= QuantizeRunTimer(previousTotalBest))
+                {
+                    SetBestTime(fullStoryMode, "Total", total);
+                    for (int i = 0; i < 9; ++i)
+                        SetBestTime(fullStoryMode, FullStorySplitName(i), gFinishedRunTimes[i]);
+                }
             }
 
             timerRunning = false;

@@ -66,7 +66,13 @@ Best times are stored beside the exe:
 
 Single story saves one best time per story level for the detected difficulty.
 
-Full story saves only the completed 9-level total. The total is saved under the difficulty detected on the 9th/last story level. While running full story, each individual level split also updates the matching single story level best time for that level's detected difficulty.
+Single story run compares only against the saved single story best for the current level and difficulty.
+
+Full story saves the completed 9-level total under the difficulty detected on the 9th/last story level. If the total is equal to or better than the saved full story best, TSR-Timer also saves all 9 full story PB splits.
+
+Full story row deltas compare against those saved full story PB splits, LiveSplit-style. The bottom delta is the sum of the completed row deltas so you can see overall pace. While running full story, each completed level still updates the matching single story best time if that level is faster than its saved single-level best.
+
+In Best times, the `>` button beside a saved Full Story Run opens that run's saved PB splits for the selected difficulty.
 
 Challenge run does not save best times.
 
