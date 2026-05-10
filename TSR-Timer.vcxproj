@@ -47,7 +47,12 @@
   <ItemDefinitionGroup>
     <ClCompile>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <DebugInformationFormat>None</DebugInformationFormat>
     </ClCompile>
+    <Link>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <LinkIncremental>false</LinkIncremental>
+    </Link>
   </ItemDefinitionGroup>
   <Target Name="BuildAutosplitBridge" BeforeTargets="ClCompile">
     <Exec Command="&quot;$(WINDIR)\Microsoft.NET\Framework64\v4.0.30319\csc.exe&quot; /nologo /target:library /langversion:4 /r:Microsoft.CSharp.dll /out:&quot;$(OutDir)TSRAutosplitBridge.dll&quot; &quot;$(ProjectDir)TSRAutosplitBridge.cs&quot;" />
