@@ -1549,7 +1549,7 @@ static void DrawSingleTimer(HWND hwnd)
     SetTextColor(memDC, gRunTimerLineActive ? RGB(220, 110, 110) : RGB(220, 220, 220));
     DrawTextA(memDC, timerText, -1, &timerRect, DT_CENTER | DT_TOP | DT_SINGLELINE);
 
-    if (gSingleTimerBestDiffKnown)
+    if (gAppScreen == AppScreen::SingleLevelTimer && gSingleTimerBestDiffKnown)
     {
         char deltaText[32];
         FormatRunDelta(gSingleTimerBestDiff, deltaText, sizeof(deltaText));

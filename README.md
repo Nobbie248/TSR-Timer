@@ -74,7 +74,7 @@ Full story row deltas compare against those saved full story PB splits, LiveSpli
 
 In Best times, the `>` button beside a saved Full Story Run opens that run's saved PB splits for the selected difficulty.
 
-Challenge run does not save best times.
+Challenge run does not save best times or show PB deltas.
 
 Full challenge best times are temporarily hidden while Full challenge run is unavailable.
 
@@ -123,6 +123,8 @@ Timing Accuracy
 TSR-Timer uses Windows `QueryPerformanceCounter`, the same high-resolution timer style used by LiveSplit-style timers.
 
 The game event bridge polls every 4 ms. This keeps start/stop detection accurate while staying light on CPU.
+
+Some story finish times may look biased toward the same last centisecond digits. That is the game event, not the app timer. TSR-Timer records the Windows timer moment when the game exposes `AllObjectivesComplete_Event`; if the game only raises that event on its own update cadence, the app cannot create timing precision before the event exists.
 
 Display Mode
 ------------
